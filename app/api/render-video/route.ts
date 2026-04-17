@@ -74,7 +74,6 @@ export async function POST(req: NextRequest) {
   } = await req.json()
 
   const isVertical = orientation === 'vertical'
-  const resolution = isVertical ? 'portrait-hd' : 'hd'
 
   const imageMap = new Map(imageResults.map((r) => [r.segmentIndex, r.imageUrl]))
   const sorted = [...segments].sort((a, b) => a.segmentIndex - b.segmentIndex)
@@ -96,7 +95,9 @@ export async function POST(req: NextRequest) {
     ],
   }
 
-  const output = { format: 'mp4', resolution, fps: 25 }
+  const output = isVertical
+    ? { format: 'mp4', resolution: 'hd', size: { width: 720, height: 1280 }, fps: 25 }
+    : { format: 'mp4', resolution: 'hd', fps: 25 }
 
   const res = await fetch('https://api.shotstack.io/stage/render', {
     method: 'POST',
