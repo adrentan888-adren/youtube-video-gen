@@ -4,7 +4,8 @@ import type { Segment, ImageTask } from '@/lib/types'
 const KIE_KEY = process.env.KIE_AI_API_KEY!
 
 export async function POST(req: NextRequest) {
-  const { segments }: { segments: Segment[] } = await req.json()
+  const { segments, orientation = 'horizontal' }: { segments: Segment[]; orientation?: string } = await req.json()
+  const imageSize = orientation === 'vertical' ? '9:16' : '3:2'
 
   const results = await Promise.all(
     segments.map(async (seg) => {
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({
           prompt: seg.imagePrompt + '. Photorealistic, cinematic, high quality.',
-          size: '3:2',
+          size: imageSize,
           nVariants: 1,
         }),
       })

@@ -179,7 +179,7 @@ const INITIAL_STEPS: Step[] = [
   { id: 'script', label: 'Script', sublabel: 'GPT-5.2 generates script', status: 'idle' },
   { id: 'audio', label: 'Narration', sublabel: 'ElevenLabs TTS creates voiceover', status: 'idle' },
   { id: 'images', label: 'Visuals', sublabel: 'GPT-4o generates HD images', status: 'idle' },
-  { id: 'video', label: 'Video', sublabel: 'Shotstack assembles with captions', status: 'idle' },
+  { id: 'video', label: 'Video', sublabel: 'Shotstack assembles with subtitles', status: 'idle' },
 ]
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -188,6 +188,7 @@ export default function Home() {
   const [topic, setTopic] = useState('')
   const [totalSeconds, setTotalSeconds] = useState(600)
   const [imageInterval, setImageInterval] = useState(30)
+  const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>('horizontal')
   const [steps, setSteps] = useState<Step[]>(INITIAL_STEPS)
   const [running, setRunning] = useState(false)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -257,7 +258,7 @@ export default function Home() {
       const imgSubRes = await fetch('/api/submit-images', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ segments: script.segments }),
+        body: JSON.stringify({ segments: script.segments, orientation }),
       })
       if (!imgSubRes.ok) throw new Error(`Image submit: ${(await imgSubRes.json()).error}`)
       const { tasks }: { tasks: ImageTask[] } = await imgSubRes.json()
@@ -299,6 +300,7 @@ export default function Home() {
           audioUrl,
           title: script.title,
           clipDuration: imageInterval,
+          orientation,
         }),
       })
       if (!renderRes.ok) throw new Error(`Render submit: ${(await renderRes.json()).error}`)
@@ -358,7 +360,7 @@ export default function Home() {
             <span className="text-white">Into a Video</span>
           </h1>
           <p className="text-white/40 text-sm max-w-md mx-auto leading-relaxed">
-            Script · Voiceover · AI visuals · Stylish captions — assembled into an HD video
+            Script · Voiceover · AI visuals · Timed subtitles — YouTube or TikTok ready
           </p>
         </div>
 
@@ -392,6 +394,45 @@ export default function Home() {
                 ) : (
                   'Generate ↗'
                 )}
+              </button>
+            </div>
+          </div>
+
+          {/* Orientation selector */}
+          <div className="space-y-2">
+            <p className="text-xs text-white/30 font-medium uppercase tracking-widest">Format</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={running}
+                onClick={() => setOrientation('horizontal')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-150 border ${
+                  orientation === 'horizontal'
+                    ? 'bg-purple-500/30 text-purple-200 border-purple-500/50'
+                    : 'bg-white/5 text-white/40 border-transparent hover:bg-white/10 hover:text-white/60'
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 16" fill="currentColor">
+                  <rect x="0" y="0" width="24" height="16" rx="2" opacity="0.3"/>
+                  <rect x="1" y="1" width="22" height="14" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+                </svg>
+                YouTube 16:9
+              </button>
+              <button
+                type="button"
+                disabled={running}
+                onClick={() => setOrientation('vertical')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-150 border ${
+                  orientation === 'vertical'
+                    ? 'bg-purple-500/30 text-purple-200 border-purple-500/50'
+                    : 'bg-white/5 text-white/40 border-transparent hover:bg-white/10 hover:text-white/60'
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                <svg className="w-3 h-4" viewBox="0 0 16 24" fill="currentColor">
+                  <rect x="0" y="0" width="16" height="24" rx="2" opacity="0.3"/>
+                  <rect x="1" y="1" width="14" height="22" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5"/>
+                </svg>
+                TikTok 9:16
               </button>
             </div>
           </div>
@@ -453,7 +494,7 @@ export default function Home() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-white font-semibold text-sm leading-tight">{videoTitle}</p>
-                <p className="text-white/40 text-xs mt-1">{durationLabel} · HD 1280×720 · {segmentCount} scenes · Stylish captions</p>
+                <p className="text-white/40 text-xs mt-1">{durationLabel} · {orientation === 'vertical' ? '720×1280 Vertical' : 'HD 1280×720'} · {segmentCount} scenes · Timed subtitles</p>
               </div>
             </div>
 

@@ -9,13 +9,17 @@ export async function POST(req: NextRequest) {
 
   const totalMinutes = Math.round((segmentCount * wordsPerSegment) / 130)
 
-  const prompt = `Create a ${totalMinutes}-minute YouTube video script about: "${topic}"
+  const prompt = `You are a very experienced social media script creator. Create a script for this topic: "${topic}"
+
+You need to create a very catchy 3-second hook for the first segment that immediately grabs attention. Make the whole script extremely interesting so that the audience will continue listening all the way through, and also ensure they get great practical takeaways by the end.
 
 STRICT RULES:
 - Exactly ${segmentCount} segments
+- Segment 1 MUST be a powerful hook (first 3 seconds grab attention)
 - narration: ${wordsPerSegment} words MAXIMUM per segment (no exceptions)
 - image_prompt: 10-12 words MAXIMUM (short scene description only)
 - section_title: 3-5 words MAXIMUM (catchy chapter heading)
+- Keep the audience hooked throughout — vary pacing, use curiosity gaps, build to a satisfying conclusion
 
 Respond with ONLY this JSON structure, no extra text:
 {"title":"T","description":"D","segments":[{"segment_number":1,"section_title":"S","narration":"N","image_prompt":"P"}]}`
@@ -29,7 +33,7 @@ Respond with ONLY this JSON structure, no extra text:
     body: JSON.stringify({
       model: 'gpt-5-2',
       messages: [
-        { role: 'system', content: 'You are a professional educational video script writer.' },
+        { role: 'system', content: 'You are a very experienced social media script creator who specializes in creating viral, highly engaging video scripts with strong hooks and compelling storytelling.' },
         { role: 'user', content: prompt },
       ],
       temperature: 0.7,

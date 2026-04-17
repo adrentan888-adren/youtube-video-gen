@@ -3,10 +3,57 @@ import type { Segment, ImageResult } from '@/lib/types'
 
 const SHOTSTACK_KEY = process.env.SHOTSTACK_API_KEY!
 const EFFECTS = ['zoomIn', 'zoomOut', 'slideLeft', 'slideRight']
+const WORDS_PER_SEC = 2.2
+const CHUNK_SIZE = 6
 
-function buildCaptionHtml(sectionTitle: string, segmentNumber: number): string {
-  const num = String(segmentNumber).padStart(2, '0')
-  return `<div style="display:flex;align-items:center;gap:14px;padding:0 64px;height:96px;"><span style="font-family:'Montserrat',sans-serif;font-size:28px;font-weight:900;color:#a78bfa;letter-spacing:2px;flex-shrink:0;">${num}</span><span style="font-family:'Montserrat',sans-serif;font-size:42px;font-weight:800;color:#ffffff;text-shadow:0 2px 16px rgba(0,0,0,0.9),0 0 40px rgba(0,0,0,0.7);letter-spacing:-0.5px;line-height:1.1;">${sectionTitle}</span></div>`
+function buildSubtitleHtml(text: string, isVertical: boolean): string {
+  const fontSize = isVertical ? '38px' : '34px'
+  return `<div style="display:flex;align-items:center;justify-content:center;padding:12px 24px;background:rgba(0,0,0,0.55);border-radius:10px;"><span style="font-family:'Montserrat',sans-serif;font-size:${fontSize};font-weight:800;color:#ffffff;text-shadow:0 2px 8px rgba(0,0,0,0.9);letter-spacing:-0.3px;line-height:1.3;text-align:center;">${text}</span></div>`
+}
+
+function generateSubtitleClips(
+  segments: Segment[],
+  clipDuration: number,
+  isVertical: boolean
+) {
+  const clips = []
+  const width = isVertical ? 680 : 1220
+  const height = 130
+
+  const sorted = [...segments].sort((a, b) => a.segmentIndex - b.segmentIndex)
+
+  for (const seg of sorted) {
+    const segStart = seg.segmentIndex * clipDuration
+    const words = seg.narration.trim().split(/\s+/)
+
+    let wordOffset = 0
+    while (wordOffset < words.length) {
+      const chunk = words.slice(wordOffset, wordOffset + CHUNK_SIZE)
+      const chunkStart = segStart + wordOffset / WORDS_PER_SEC
+      const chunkDuration = chunk.length / WORDS_PER_SEC
+      const clampedEnd = Math.min(chunkStart + chunkDuration, segStart + clipDuration - 0.1)
+      const clampedDuration = Math.max(0.2, clampedEnd - chunkStart)
+
+      clips.push({
+        asset: {
+          type: 'html',
+          html: buildSubtitleHtml(chunk.join(' '), isVertical),
+          css: "@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@800;900&display=swap');",
+          width,
+          height,
+          background: 'transparent',
+        },
+        start: Math.round(chunkStart * 100) / 100,
+        length: Math.round(clampedDuration * 100) / 100,
+        position: 'bottom',
+        offset: { x: 0, y: isVertical ? 0.12 : 0.08 },
+      })
+
+      wordOffset += CHUNK_SIZE
+    }
+  }
+
+  return clips
 }
 
 export async function POST(req: NextRequest) {
@@ -16,18 +63,20 @@ export async function POST(req: NextRequest) {
     audioUrl,
     title,
     clipDuration = 30,
+    orientation = 'horizontal',
   }: {
     segments: Segment[]
     imageResults: ImageResult[]
     audioUrl: string
     title: string
     clipDuration?: number
+    orientation?: string
   } = await req.json()
 
-  // Build a lookup from segmentIndex → imageUrl
-  const imageMap = new Map(imageResults.map((r) => [r.segmentIndex, r.imageUrl]))
+  const isVertical = orientation === 'vertical'
+  const resolution = isVertical ? 'portrait-hd' : 'hd'
 
-  // Sort segments by index
+  const imageMap = new Map(imageResults.map((r) => [r.segmentIndex, r.imageUrl]))
   const sorted = [...segments].sort((a, b) => a.segmentIndex - b.segmentIndex)
 
   const imageclips = sorted.map((seg, i) => ({
@@ -37,30 +86,17 @@ export async function POST(req: NextRequest) {
     effect: EFFECTS[i % 4],
   }))
 
-  const captionClips = sorted.map((seg, i) => ({
-    asset: {
-      type: 'html',
-      html: buildCaptionHtml(seg.sectionTitle, seg.segmentNumber),
-      css: "@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800;900&display=swap');",
-      width: 1280,
-      height: 96,
-      background: 'transparent',
-    },
-    start: i * clipDuration,
-    length: clipDuration,
-    position: 'bottom',
-    offset: { x: 0, y: 0.08 },
-  }))
+  const subtitleClips = generateSubtitleClips(segments, clipDuration, isVertical)
 
   const timeline = {
     soundtrack: { src: audioUrl, effect: 'fadeOut' },
     tracks: [
-      { clips: captionClips },
+      { clips: subtitleClips },
       { clips: imageclips },
     ],
   }
 
-  const output = { format: 'mp4', resolution: 'hd', fps: 25 }
+  const output = { format: 'mp4', resolution, fps: 25 }
 
   const res = await fetch('https://api.shotstack.io/stage/render', {
     method: 'POST',
