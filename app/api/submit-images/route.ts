@@ -3,9 +3,9 @@ import type { Segment, ImageTask } from '@/lib/types'
 
 const KIE_KEY = process.env.KIE_AI_API_KEY!
 
-// kie.ai supported sizes
+// kie.ai supported sizes (9:16 is rejected; use 2:3 for portrait)
 const SIZE_MAP: Record<string, string> = {
-  vertical: '9:16',
+  vertical: '2:3',
   horizontal: '3:2',
 }
 
