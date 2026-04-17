@@ -4,14 +4,16 @@ import type { Script } from '@/lib/types'
 const KIE_KEY = process.env.KIE_AI_API_KEY!
 
 export async function POST(req: NextRequest) {
-  const { topic } = await req.json()
+  const { topic, segmentCount = 20, wordsPerSegment = 65 } = await req.json()
   if (!topic?.trim()) return NextResponse.json({ error: 'topic required' }, { status: 400 })
 
-  const prompt = `Create a 10-minute YouTube video script about: "${topic}"
+  const totalMinutes = Math.round((segmentCount * wordsPerSegment) / 130)
+
+  const prompt = `Create a ${totalMinutes}-minute YouTube video script about: "${topic}"
 
 STRICT RULES:
-- Exactly 20 segments
-- narration: 60-65 words MAXIMUM per segment (no exceptions)
+- Exactly ${segmentCount} segments
+- narration: ${wordsPerSegment} words MAXIMUM per segment (no exceptions)
 - image_prompt: 10-12 words MAXIMUM (short scene description only)
 - section_title: 3-5 words MAXIMUM (catchy chapter heading)
 

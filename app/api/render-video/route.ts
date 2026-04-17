@@ -15,11 +15,13 @@ export async function POST(req: NextRequest) {
     imageResults,
     audioUrl,
     title,
+    clipDuration = 30,
   }: {
     segments: Segment[]
     imageResults: ImageResult[]
     audioUrl: string
     title: string
+    clipDuration?: number
   } = await req.json()
 
   // Build a lookup from segmentIndex → imageUrl
@@ -30,8 +32,8 @@ export async function POST(req: NextRequest) {
 
   const imageclips = sorted.map((seg, i) => ({
     asset: { type: 'image', src: imageMap.get(seg.segmentIndex) ?? '' },
-    start: i * 30,
-    length: 30,
+    start: i * clipDuration,
+    length: clipDuration,
     effect: EFFECTS[i % 4],
   }))
 
@@ -44,8 +46,8 @@ export async function POST(req: NextRequest) {
       height: 96,
       background: 'transparent',
     },
-    start: i * 30,
-    length: 30,
+    start: i * clipDuration,
+    length: clipDuration,
     position: 'bottom',
     offset: { x: 0, y: 0.08 },
   }))
