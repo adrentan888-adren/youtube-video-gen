@@ -41,25 +41,48 @@ const INTERVAL_OPTIONS: [string, number][] = [
 // Approx words per second of narration (~130 wpm)
 const WORDS_PER_SEC = 2.2
 
-function PillGroup<T>({
+function PillGroup({
   options,
   value,
   onChange,
   disabled,
+  unit,
+  min,
+  max,
 }: {
-  options: [string, T][]
-  value: T
-  onChange: (v: T) => void
+  options: [string, number][]
+  value: number
+  onChange: (v: number) => void
   disabled?: boolean
+  unit: string
+  min: number
+  max: number
 }) {
+  const isPreset = options.some(([, v]) => v === value)
+  const [customRaw, setCustomRaw] = useState('')
+
+  // For duration: value stored as seconds, user inputs minutes → multiply by 60
+  // For interval: value stored as seconds, user inputs seconds → no conversion
+  const multiplier = unit === 'min' ? 60 : 1
+  const displayValue = Math.round(value / multiplier)
+
+  const commitCustom = () => {
+    const n = parseFloat(customRaw)
+    if (!isNaN(n) && n > 0) {
+      const clamped = Math.round(Math.max(min, Math.min(max, n)))
+      onChange(clamped * multiplier)
+    }
+    setCustomRaw('')
+  }
+
   return (
-    <div className="flex gap-1.5 flex-wrap">
+    <div className="flex gap-1.5 flex-wrap items-center">
       {options.map(([label, val]) => (
         <button
           key={label}
           type="button"
           disabled={disabled}
-          onClick={() => onChange(val)}
+          onClick={() => { onChange(val); setCustomRaw('') }}
           className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
             value === val
               ? 'bg-purple-500/30 text-purple-200 border border-purple-500/50'
@@ -69,6 +92,27 @@ function PillGroup<T>({
           {label}
         </button>
       ))}
+
+      {/* Custom input */}
+      <div className={`flex items-center rounded-lg border text-xs transition-all duration-150 overflow-hidden ${
+        !isPreset
+          ? 'border-purple-500/50 bg-purple-500/10'
+          : 'border-white/10 bg-white/5'
+      } ${disabled ? 'opacity-40' : ''}`}>
+        <input
+          type="number"
+          disabled={disabled}
+          value={customRaw}
+          placeholder={!isPreset ? String(displayValue) : 'custom'}
+          min={min}
+          max={max}
+          onChange={(e) => setCustomRaw(e.target.value)}
+          onBlur={commitCustom}
+          onKeyDown={(e) => { if (e.key === 'Enter') { commitCustom(); (e.target as HTMLInputElement).blur() } }}
+          className="w-16 bg-transparent px-2 py-1.5 text-white/60 placeholder-white/20 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        />
+        <span className="pr-2 text-white/25 select-none">{unit}</span>
+      </div>
     </div>
   )
 }
@@ -361,6 +405,9 @@ export default function Home() {
                 value={totalSeconds}
                 onChange={setTotalSeconds}
                 disabled={running}
+                unit="min"
+                min={1}
+                max={60}
               />
             </div>
             <div className="space-y-2">
@@ -370,6 +417,9 @@ export default function Home() {
                 value={imageInterval}
                 onChange={setImageInterval}
                 disabled={running}
+                unit="s"
+                min={5}
+                max={120}
               />
             </div>
           </div>
