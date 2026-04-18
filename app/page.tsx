@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import type { Script, ImageTask, ImageResult } from '@/lib/types'
+import type { Script, ImageResult } from '@/lib/types'
 
 type StepStatus = 'idle' | 'running' | 'done' | 'error'
 
@@ -178,7 +178,7 @@ function StepRow({ step, index }: { step: Step; index: number }) {
 const INITIAL_STEPS: Step[] = [
   { id: 'script', label: 'Script', sublabel: 'GPT-5.2 generates script', status: 'idle' },
   { id: 'audio', label: 'Narration', sublabel: 'ElevenLabs TTS creates voiceover', status: 'idle' },
-  { id: 'images', label: 'Visuals', sublabel: 'GPT-4o generates HD images', status: 'idle' },
+  { id: 'images', label: 'Visuals', sublabel: 'Pexels stock photos sourced', status: 'idle' },
   { id: 'video', label: 'Video', sublabel: 'Shotstack assembles with subtitles', status: 'idle' },
 ]
 
@@ -253,40 +253,19 @@ export default function Home() {
       setStep('audio', { status: 'done', message: 'Voiceover ready' })
 
       // ── STEP 3: Images ─────────────────────────────────────────────
-      setStep('images', { status: 'running', message: `Submitting ${script.segments.length} image jobs…` })
+      setStep('images', { status: 'running', message: `Searching ${script.segments.length} stock photos…` })
 
-      const imgSubRes = await fetch('/api/submit-images', {
+      const imgRes = await fetch('/api/search-images', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ segments: script.segments, orientation }),
       })
-      if (!imgSubRes.ok) throw new Error(`Image submit: ${(await imgSubRes.json()).error}`)
-      const { tasks }: { tasks: ImageTask[] } = await imgSubRes.json()
+      if (!imgRes.ok) throw new Error(`Image search: ${(await imgRes.json()).error}`)
+      const { imageResults }: { imageResults: ImageResult[] } = await imgRes.json()
 
-      const waitSecs = Math.max(60, segmentCount * 5)
-      setStep('images', { message: `Waiting ${waitSecs}s for image generation…` })
-      await sleep(waitSecs * 1000)
-
-      let imageResults: ImageResult[] = []
-      let pendingTasks = [...tasks]
-
-      for (let attempt = 0; attempt < 15; attempt++) {
-        const checkRes = await fetch('/api/check-images', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tasks: pendingTasks }),
-        })
-        if (!checkRes.ok) throw new Error('Image check failed')
-        const { completed, pending }: { completed: ImageResult[]; pending: ImageTask[] } = await checkRes.json()
-        imageResults = [...imageResults, ...completed]
-        pendingTasks = pending
-        setStep('images', { message: `${imageResults.length} / ${script.segments.length} images ready…` })
-        if (pending.length === 0) break
-        await sleep(15000)
-      }
       if (imageResults.length < script.segments.length)
-        throw new Error(`Only ${imageResults.length}/${script.segments.length} images completed`)
-      setStep('images', { status: 'done', message: `${imageResults.length} HD visuals generated` })
+        throw new Error(`Only ${imageResults.length}/${script.segments.length} images found`)
+      setStep('images', { status: 'done', message: `${imageResults.length} stock photos sourced` })
 
       // ── STEP 4: Render ─────────────────────────────────────────────
       setStep('video', { status: 'running', message: 'Submitting Shotstack render…' })
@@ -360,7 +339,7 @@ export default function Home() {
             <span className="text-white">Into a Video</span>
           </h1>
           <p className="text-white/40 text-sm max-w-md mx-auto leading-relaxed">
-            Script · Voiceover · AI visuals · Timed subtitles — YouTube or TikTok ready
+            Script · Voiceover · Stock visuals · Timed subtitles — YouTube or TikTok ready
           </p>
         </div>
 
@@ -524,7 +503,7 @@ export default function Home() {
 
         {/* Footer */}
         <p className="text-center text-white/15 text-xs">
-          Powered by kie.ai · ElevenLabs · GPT-4o · Shotstack
+          Powered by kie.ai · ElevenLabs · Pexels · Shotstack
         </p>
       </div>
     </main>
