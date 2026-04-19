@@ -15,7 +15,10 @@ export async function GET(req: NextRequest) {
 
     const { status, videoUrl, error, progress } = await res.json()
 
-    if (status === 'done') return NextResponse.json({ status: 'done', videoUrl })
+    if (status === 'done') {
+      const secureUrl = typeof videoUrl === 'string' ? videoUrl.replace(/^http:\/\//, 'https://') : videoUrl
+      return NextResponse.json({ status: 'done', videoUrl: secureUrl })
+    }
     if (status === 'failed') return NextResponse.json({ status: 'failed', error })
 
     return NextResponse.json({ status: 'rendering', progress })

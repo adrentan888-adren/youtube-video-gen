@@ -65,23 +65,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
   const sorted = [...segments].sort((a, b) => a.segmentIndex - b.segmentIndex)
   const lines = []
 
+  // Time captions as a continuous stream matching the single TTS audio track.
+  // Do NOT restart timing per segment — that causes drift vs the voice.
+  let globalWordOffset = 0
+
   for (const seg of sorted) {
-    const segStart = seg.segmentIndex * clipDuration
     const words = seg.narration.trim().split(/\s+/)
     let offset = 0
 
     while (offset < words.length) {
       const chunk = words.slice(offset, offset + CHUNK)
-      const start = segStart + offset / WORDS_PER_SEC
-      const rawEnd = start + chunk.length / WORDS_PER_SEC
-      const end = Math.min(rawEnd, segStart + clipDuration - 0.05)
-      const dur = Math.max(0.2, end - start)
+      const start = (globalWordOffset + offset) / WORDS_PER_SEC
+      const dur = Math.max(0.2, chunk.length / WORDS_PER_SEC)
 
       lines.push(
         `Dialogue: 0,${toAssTime(start)},${toAssTime(start + dur)},Default,,0,0,0,,${chunk.join(' ')}`
       )
       offset += CHUNK
     }
+
+    globalWordOffset += words.length
   }
 
   return header + '\n' + lines.join('\n') + '\n'

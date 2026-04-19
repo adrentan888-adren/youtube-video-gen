@@ -179,7 +179,7 @@ const INITIAL_STEPS: Step[] = [
   { id: 'script', label: 'Script', sublabel: 'GPT-5.2 generates script', status: 'idle' },
   { id: 'audio', label: 'Narration', sublabel: 'ElevenLabs TTS creates voiceover', status: 'idle' },
   { id: 'images', label: 'Visuals', sublabel: 'Pexels stock photos sourced', status: 'idle' },
-  { id: 'video', label: 'Video', sublabel: 'Shotstack assembles with subtitles', status: 'idle' },
+  { id: 'video', label: 'Video', sublabel: 'FFmpeg assembles with subtitles', status: 'idle' },
 ]
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -268,7 +268,7 @@ export default function Home() {
       setStep('images', { status: 'done', message: `${imageResults.length} stock photos sourced` })
 
       // ── STEP 4: Render ─────────────────────────────────────────────
-      setStep('video', { status: 'running', message: 'Submitting Shotstack render…' })
+      setStep('video', { status: 'running', message: 'Submitting render…' })
 
       const renderRes = await fetch('/api/render-video', {
         method: 'POST',
@@ -504,7 +504,7 @@ export default function Home() {
 
         {/* Footer */}
         <p className="text-center text-white/15 text-xs">
-          Powered by kie.ai · ElevenLabs · Pexels · Shotstack
+          Powered by kie.ai · ElevenLabs · Pexels · FFmpeg
         </p>
       </div>
     </main>
