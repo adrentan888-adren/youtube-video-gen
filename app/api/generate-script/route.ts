@@ -39,7 +39,7 @@ function extractJSON(raw: string): unknown | null {
 }
 
 const KIE_KEY = process.env.KIE_AI_API_KEY!
-const BATCH_SIZE = 60
+const BATCH_SIZE = 30
 
 async function generateBatch(
   topic: string,
