@@ -1,6 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Script, Segment } from '@/lib/types'
 
+// Extracts the first complete JSON array or object from a string using bracket counting
+function extractJSON(content: string): unknown | null {
+  for (let si = 0; si < content.length; si++) {
+    const open = content[si]
+    if (open !== '[' && open !== '{') continue
+    const close = open === '[' ? ']' : '}'
+    let depth = 0, inStr = false, esc = false
+    for (let ei = si; ei < content.length; ei++) {
+      const ch = content[ei]
+      if (esc) { esc = false; continue }
+      if (ch === '\\' && inStr) { esc = true; continue }
+      if (ch === '"') { inStr = !inStr; continue }
+      if (!inStr) {
+        if (ch === open) depth++
+        else if (ch === close) { depth--; if (depth === 0) { try { return JSON.parse(content.slice(si, ei + 1)) } catch { break } } }
+      }
+    }
+  }
+  return null
+}
+
 const KIE_KEY = process.env.KIE_AI_API_KEY!
 const BATCH_SIZE = 60
 
@@ -54,18 +75,11 @@ Respond with ONLY this JSON array, no extra text:
   const raw = await res.json()
   const content: string = raw.data?.choices?.[0]?.message?.content ?? raw.choices?.[0]?.message?.content ?? ''
 
-  // Accept either a bare array [...] or an object with a segments key {"segments":[...]}
-  let parsedSegments: Array<{ segment_number: number; section_title: string; narration: string; image_prompt: string }>
-  const arrayMatch = content.match(/\[[\s\S]*\]/)
-  const objectMatch = content.match(/\{[\s\S]*\}/)
-  if (arrayMatch) {
-    parsedSegments = JSON.parse(arrayMatch[0])
-  } else if (objectMatch) {
-    const obj = JSON.parse(objectMatch[0])
-    parsedSegments = obj.segments ?? obj
-  } else {
-    throw new Error(`Could not parse batch JSON (batch starting at ${batchStart + 1})`)
-  }
+  const parsed = extractJSON(content)
+  if (!parsed) throw new Error(`Could not parse batch JSON (batch starting at ${batchStart + 1})`)
+  const parsedSegments: Array<{ segment_number: number; section_title: string; narration: string; image_prompt: string }> =
+    Array.isArray(parsed) ? parsed : (parsed as { segments?: [] }).segments ?? []
+  if (!parsedSegments.length) throw new Error(`Empty segments in batch starting at ${batchStart + 1}`)
 
   return parsedSegments.map((s, i: number) => ({
     segmentIndex: batchStart + i,
@@ -120,10 +134,8 @@ Respond with ONLY this JSON structure, no extra text:
 
       const raw = await res.json()
       const content: string = raw.data?.choices?.[0]?.message?.content ?? raw.choices?.[0]?.message?.content ?? ''
-      const jsonMatch = content.match(/\{[\s\S]*\}/)
-      if (!jsonMatch) return NextResponse.json({ error: 'Could not parse script JSON' }, { status: 500 })
-
-      const parsed = JSON.parse(jsonMatch[0])
+      const parsed = extractJSON(content) as { title?: string; description?: string; segments?: [] } | null
+      if (!parsed) return NextResponse.json({ error: 'Could not parse script JSON' }, { status: 500 })
       title = parsed.title
       description = parsed.description
       allSegments = parsed.segments.map((s: { segment_number: number; section_title: string; narration: string; image_prompt: string }, i: number) => ({
