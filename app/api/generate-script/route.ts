@@ -54,11 +54,20 @@ Respond with ONLY this JSON array, no extra text:
   const raw = await res.json()
   const content: string = raw.data?.choices?.[0]?.message?.content ?? raw.choices?.[0]?.message?.content ?? ''
 
-  const jsonMatch = content.match(/\[[\s\S]*\]/)
-  if (!jsonMatch) throw new Error(`Could not parse batch JSON (batch starting at ${batchStart + 1})`)
+  // Accept either a bare array [...] or an object with a segments key {"segments":[...]}
+  let parsedSegments: Array<{ segment_number: number; section_title: string; narration: string; image_prompt: string }>
+  const arrayMatch = content.match(/\[[\s\S]*\]/)
+  const objectMatch = content.match(/\{[\s\S]*\}/)
+  if (arrayMatch) {
+    parsedSegments = JSON.parse(arrayMatch[0])
+  } else if (objectMatch) {
+    const obj = JSON.parse(objectMatch[0])
+    parsedSegments = obj.segments ?? obj
+  } else {
+    throw new Error(`Could not parse batch JSON (batch starting at ${batchStart + 1})`)
+  }
 
-  const parsed = JSON.parse(jsonMatch[0])
-  return parsed.map((s: { segment_number: number; section_title: string; narration: string; image_prompt: string }, i: number) => ({
+  return parsedSegments.map((s, i: number) => ({
     segmentIndex: batchStart + i,
     segmentNumber: s.segment_number,
     sectionTitle: s.section_title,
