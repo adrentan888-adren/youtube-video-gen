@@ -134,11 +134,11 @@ Respond with ONLY this JSON structure, no extra text:
 
       const raw = await res.json()
       const content: string = raw.data?.choices?.[0]?.message?.content ?? raw.choices?.[0]?.message?.content ?? ''
-      const parsed = extractJSON(content) as { title?: string; description?: string; segments?: [] } | null
-      if (!parsed) return NextResponse.json({ error: 'Could not parse script JSON' }, { status: 500 })
-      title = parsed.title
-      description = parsed.description
-      allSegments = parsed.segments.map((s: { segment_number: number; section_title: string; narration: string; image_prompt: string }, i: number) => ({
+      const parsed = extractJSON(content) as { title?: string; description?: string; segments?: Array<{ segment_number: number; section_title: string; narration: string; image_prompt: string }> } | null
+      if (!parsed || !parsed.segments) return NextResponse.json({ error: 'Could not parse script JSON' }, { status: 500 })
+      title = parsed.title ?? topic
+      description = parsed.description ?? ''
+      allSegments = parsed.segments.map((s, i: number) => ({
         segmentIndex: i,
         segmentNumber: s.segment_number,
         sectionTitle: s.section_title,
