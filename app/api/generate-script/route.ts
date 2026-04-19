@@ -75,11 +75,24 @@ Respond with ONLY this JSON array, no extra text:
   const raw = await res.json()
   const content: string = raw.data?.choices?.[0]?.message?.content ?? raw.choices?.[0]?.message?.content ?? ''
 
-  const parsed = extractJSON(content)
-  if (!parsed) throw new Error(`Could not parse batch JSON (batch starting at ${batchStart + 1})`)
-  const parsedSegments: Array<{ segment_number: number; section_title: string; narration: string; image_prompt: string }> =
-    Array.isArray(parsed) ? parsed : (parsed as { segments?: [] }).segments ?? []
-  if (!parsedSegments.length) throw new Error(`Empty segments in batch starting at ${batchStart + 1}`)
+  type SegRow = { segment_number: number; section_title: string; narration: string; image_prompt: string }
+  // Strip markdown code fences, then prefer finding an array over an object
+  const cleaned = content.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim()
+  let parsedSegments: SegRow[] | null = null
+
+  // Try every [ position first (prefer arrays)
+  for (let si = 0; si < cleaned.length; si++) {
+    if (cleaned[si] === '[') {
+      const candidate = extractJSON(cleaned.slice(si))
+      if (Array.isArray(candidate) && candidate.length > 0) { parsedSegments = candidate as SegRow[]; break }
+    }
+  }
+  // Fallback: object with segments key
+  if (!parsedSegments) {
+    const obj = extractJSON(cleaned) as { segments?: SegRow[] } | null
+    parsedSegments = obj?.segments ?? null
+  }
+  if (!parsedSegments || parsedSegments.length === 0) throw new Error(`Could not parse segments in batch starting at ${batchStart + 1}`)
 
   return parsedSegments.map((s, i: number) => ({
     segmentIndex: batchStart + i,
