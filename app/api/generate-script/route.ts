@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { Script, Segment } from '@/lib/types'
 
-// Extracts the first complete JSON array or object from a string using bracket counting
-function extractJSON(content: string): unknown | null {
+// Sanitize and extract valid JSON from a model response string
+function extractJSON(raw: string): unknown | null {
+  // Strip markdown code fences
+  let content = raw.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '').trim()
+
+  // Replace literal control characters (newlines, tabs) with spaces — models often emit these
+  // inside JSON string values which makes JSON.parse fail
+  content = content.replace(/[\r\n\t]/g, ' ')
+
+  // Try direct parse first
+  try { return JSON.parse(content) } catch { /* fall through */ }
+
+  // Find the first [ or { and try parsing from there to matching close bracket
   for (let si = 0; si < content.length; si++) {
     const open = content[si]
     if (open !== '[' && open !== '{') continue
@@ -15,7 +26,12 @@ function extractJSON(content: string): unknown | null {
       if (ch === '"') { inStr = !inStr; continue }
       if (!inStr) {
         if (ch === open) depth++
-        else if (ch === close) { depth--; if (depth === 0) { try { return JSON.parse(content.slice(si, ei + 1)) } catch { break } } }
+        else if (ch === close) {
+          depth--
+          if (depth === 0) {
+            try { return JSON.parse(content.slice(si, ei + 1)) } catch { break }
+          }
+        }
       }
     }
   }
