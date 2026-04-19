@@ -1,18 +1,12 @@
 FROM node:20-slim
 
-# Install FFmpeg, font tools, and CA certificates for HTTPS downloads
+# Install FFmpeg + system fonts (no external download needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    curl \
-    ca-certificates \
+    fonts-liberation \
+    fonts-dejavu-core \
     fontconfig \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Montserrat ExtraBold from Google Fonts GitHub
-RUN mkdir -p /usr/share/fonts/truetype/montserrat \
-    && curl -fL \
-       "https://github.com/google/fonts/raw/main/ofl/montserrat/static/Montserrat-ExtraBold.ttf" \
-       -o /usr/share/fonts/truetype/montserrat/Montserrat-ExtraBold.ttf \
+    && rm -rf /var/lib/apt/lists/* \
     && fc-cache -fv
 
 WORKDIR /app
