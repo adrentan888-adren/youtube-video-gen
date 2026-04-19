@@ -92,7 +92,7 @@ Respond with ONLY this JSON array, no extra text:
     const obj = extractJSON(cleaned) as { segments?: SegRow[] } | null
     parsedSegments = obj?.segments ?? null
   }
-  if (!parsedSegments || parsedSegments.length === 0) throw new Error(`Could not parse segments in batch starting at ${batchStart + 1}`)
+  if (!parsedSegments || parsedSegments.length === 0) throw new Error(`Could not parse segments in batch starting at ${batchStart + 1}. Raw: ${cleaned.slice(0, 300)}`)
 
   return parsedSegments.map((s, i: number) => ({
     segmentIndex: batchStart + i,
