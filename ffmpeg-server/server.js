@@ -34,9 +34,7 @@ function downloadFile(url, dest) {
 
 function getAudioDuration(audioPath) {
   return new Promise((resolve, reject) => {
-    const ff = spawn('ffprobe', [
-      '-v', 'quiet', '-print_format', 'json', '-show_streams', audioPath
-    ])
+    const ff = spawn('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_streams', audioPath])
     let out = ''
     ff.stdout.on('data', (d) => { out += d.toString() })
     ff.on('close', (code) => {
@@ -50,82 +48,46 @@ function getAudioDuration(audioPath) {
   })
 }
 
-function toAssTime(sec) {
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = sec % 60
-  const cs = Math.round((s - Math.floor(s)) * 100)
-  return `${h}:${String(Math.floor(m)).padStart(2, '0')}:${String(Math.floor(s)).padStart(2, '00')}.${String(cs).padStart(2, '0')}`
+// Run faster-whisper on an audio file, return [{word, start, end}]
+function transcribeAudio(audioPath) {
+  return new Promise((resolve, reject) => {
+    const py = spawn('python3', [path.join(__dirname, 'transcribe.py'), audioPath])
+    let out = '', err = ''
+    py.stdout.on('data', (d) => { out += d.toString() })
+    py.stderr.on('data', (d) => { err += d.toString() })
+    py.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`Whisper failed: ${err.slice(-400)}`))
+      try { resolve(JSON.parse(out)) }
+      catch (e) { reject(new Error(`Whisper output parse failed: ${out.slice(0, 200)}`)) }
+    })
+  })
 }
 
-// chunkInfo: [{wordCount, duration}] — one entry per audio chunk, durations
-// measured from the actual downloaded audio file via ffprobe.
-function generateAss(segments, chunkInfo, isVertical) {
-  const W = isVertical ? 720 : 1280
-  const H = isVertical ? 1280 : 720
-  const fontSize = isVertical ? 42 : 36
-  const marginV = isVertical ? 110 : 80
+function toSrtTime(sec) {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = Math.floor(sec % 60)
+  const ms = Math.round((sec - Math.floor(sec)) * 1000)
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`
+}
+
+// Group words into 6-word chunks and produce SRT content
+function wordsToSrt(allWords) {
   const CHUNK = 6
-
-  // Precompute each chunk's start time (seconds) and actual words-per-sec
-  let chunkStartTimes = []
-  let chunkWps = []
-  let t = 0
-  for (const { wordCount, duration } of chunkInfo) {
-    chunkStartTimes.push(t)
-    chunkWps.push(wordCount > 0 && duration > 0 ? wordCount / duration : 2.2)
-    t += duration
-  }
-
-  // Convert global word offset → timestamp using per-chunk actual speed
-  function wordOffsetToTime(globalOffset) {
-    let remaining = globalOffset
-    for (let i = 0; i < chunkInfo.length; i++) {
-      if (remaining < chunkInfo[i].wordCount || i === chunkInfo.length - 1) {
-        return chunkStartTimes[i] + remaining / chunkWps[i]
-      }
-      remaining -= chunkInfo[i].wordCount
-    }
-    return t
-  }
-
-  const header = `[Script Info]
-ScriptType: v4.00+
-PlayResX: ${W}
-PlayResY: ${H}
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Liberation Sans,${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H99000000,-1,0,0,0,100,100,1,0,3,12,0,2,40,40,${marginV},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
-
-  const sorted = [...segments].sort((a, b) => a.segmentIndex - b.segmentIndex)
   const lines = []
-  let globalWordOffset = 0
-
-  for (const seg of sorted) {
-    const words = seg.narration.trim().split(/\s+/)
-    let offset = 0
-
-    while (offset < words.length) {
-      const chunk = words.slice(offset, offset + CHUNK)
-      const start = wordOffsetToTime(globalWordOffset + offset)
-      const end = wordOffsetToTime(globalWordOffset + offset + chunk.length)
-      const dur = Math.max(0.2, end - start)
-
-      lines.push(
-        `Dialogue: 0,${toAssTime(start)},${toAssTime(start + dur)},Default,,0,0,0,,${chunk.join(' ')}`
-      )
-      offset += CHUNK
-    }
-
-    globalWordOffset += words.length
+  let idx = 1
+  for (let i = 0; i < allWords.length; i += CHUNK) {
+    const chunk = allWords.slice(i, i + CHUNK)
+    if (!chunk.length) continue
+    const start = chunk[0].start
+    const end = chunk[chunk.length - 1].end
+    lines.push(String(idx))
+    lines.push(`${toSrtTime(start)} --> ${toSrtTime(Math.max(end, start + 0.2))}`)
+    lines.push(chunk.map((w) => w.word).join(' ').trim())
+    lines.push('')
+    idx++
   }
-
-  return header + '\n' + lines.join('\n') + '\n'
+  return lines.join('\n')
 }
 
 // ── Video processing ──────────────────────────────────────────────────────────
@@ -137,6 +99,8 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
   const isVertical = orientation === 'vertical'
   const W = isVertical ? 720 : 1280
   const H = isVertical ? 1280 : 720
+  const fontSize = isVertical ? 42 : 36
+  const marginV = isVertical ? 110 : 80
 
   // 1. Download images (batches of 10)
   jobs.set(jobId, { status: 'processing', progress: `Downloading ${imageUrls.length} images…` })
@@ -161,16 +125,23 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
     audioPaths.push(dest)
   }
 
-  // 3. Measure actual audio durations via ffprobe → calibrate caption timing
-  jobs.set(jobId, { status: 'processing', progress: 'Generating captions…' })
+  // 3. Transcribe each audio chunk with Whisper → exact word timestamps → SRT
+  jobs.set(jobId, { status: 'processing', progress: 'Transcribing audio for captions…' })
   const audioDurations = await Promise.all(audioPaths.map(getAudioDuration))
-  const chunkInfo = (wordCounts || [audioPaths.length]).map((wc, i) => ({
-    wordCount: wc,
-    duration: audioDurations[i] || 0,
-  }))
-  const assContent = generateAss(segments, chunkInfo, isVertical)
-  const assPath = path.join(jobDir, 'captions.ass')
-  await fs.writeFile(assPath, assContent, 'utf8')
+
+  const allWords = []
+  let timeOffset = 0
+  for (let i = 0; i < audioPaths.length; i++) {
+    const words = await transcribeAudio(audioPaths[i])
+    for (const w of words) {
+      if (w.word) allWords.push({ word: w.word, start: w.start + timeOffset, end: w.end + timeOffset })
+    }
+    timeOffset += audioDurations[i]
+  }
+
+  const srtContent = wordsToSrt(allWords)
+  const srtPath = path.join(jobDir, 'captions.srt')
+  await fs.writeFile(srtPath, srtContent, 'utf8')
 
   // 4. Write image concat list
   const concatLines = imagePaths.flatMap((p) => [`file '${p}'`, `duration ${clipDuration}`])
@@ -178,13 +149,14 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
   const concatPath = path.join(jobDir, 'images.txt')
   await fs.writeFile(concatPath, concatLines.join('\n'), 'utf8')
 
-  // 5. Run FFmpeg
+  // 5. Run FFmpeg with SRT subtitles (force_style gives TikTok-style appearance)
   jobs.set(jobId, { status: 'processing', progress: 'Rendering video with FFmpeg…' })
   const outputPath = path.join(jobDir, 'output.mp4')
 
-  const escapedAss = assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
+  const escapedSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
   const videoFilter = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=25`
-  const subFilter = `subtitles='${escapedAss}'`
+  const subStyle = `FontName=Liberation Sans,FontSize=${fontSize},Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H99000000,BorderStyle=3,Outline=12,Alignment=2,MarginV=${marginV}`
+  const subFilter = `subtitles='${escapedSrt}':force_style='${subStyle}'`
 
   const args = ['-y', '-f', 'concat', '-safe', '0', '-i', concatPath]
   audioPaths.forEach((ap) => args.push('-i', ap))
