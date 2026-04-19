@@ -237,20 +237,20 @@ export default function Home() {
         body: JSON.stringify({ narration: script.fullNarration }),
       })
       if (!audioSubRes.ok) throw new Error(`Audio submit: ${(await audioSubRes.json()).error}`)
-      const { taskId: audioTaskId } = await audioSubRes.json()
+      const { taskIds: audioTaskIds, wordCounts } = await audioSubRes.json()
 
-      let audioUrl = ''
+      let audioUrls: string[] = []
       for (let i = 0; i < 30; i++) {
         await sleep(8000)
         setStep('audio', { message: `Generating voiceover… (${(i + 1) * 8}s)` })
-        const checkRes = await fetch(`/api/check-audio?taskId=${audioTaskId}`)
+        const checkRes = await fetch(`/api/check-audio?taskIds=${audioTaskIds.join(',')}`)
         if (!checkRes.ok) throw new Error('Audio check failed')
-        const { status, audioUrl: url } = await checkRes.json()
-        if (status === 'done' && url) { audioUrl = url; break }
+        const { status, audioUrls: urls } = await checkRes.json()
+        if (status === 'done' && urls?.length) { audioUrls = urls; break }
         if (status === 'failed') throw new Error('TTS generation failed')
       }
-      if (!audioUrl) throw new Error('Audio timed out')
-      setStep('audio', { status: 'done', message: 'Voiceover ready' })
+      if (!audioUrls.length) throw new Error('Audio timed out')
+      setStep('audio', { status: 'done', message: `Voiceover ready (${audioUrls.length} part${audioUrls.length > 1 ? 's' : ''})` })
 
       // ── STEP 3: Images ─────────────────────────────────────────────
       setStep('images', { status: 'running', message: `Searching ${script.segments.length} stock photos…` })
@@ -276,7 +276,8 @@ export default function Home() {
         body: JSON.stringify({
           segments: script.segments,
           imageResults,
-          audioUrl,
+          audioUrls,
+          wordCounts,
           title: script.title,
           clipDuration: imageInterval,
           orientation,

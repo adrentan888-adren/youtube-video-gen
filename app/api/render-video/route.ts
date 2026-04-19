@@ -61,19 +61,41 @@ export async function POST(req: NextRequest) {
     segments,
     imageResults,
     audioUrl,
+    audioUrls,
+    wordCounts,
     title,
     clipDuration = 30,
     orientation = 'horizontal',
   }: {
     segments: Segment[]
     imageResults: ImageResult[]
-    audioUrl: string
+    audioUrl?: string
+    audioUrls?: string[]
+    wordCounts?: number[]
     title: string
     clipDuration?: number
     orientation?: string
   } = await req.json()
 
   const isVertical = orientation === 'vertical'
+  const totalDuration = segments.length * clipDuration
+
+  // Support both legacy single audioUrl and new multi-chunk audioUrls
+  const allAudioUrls: string[] = audioUrls ?? (audioUrl ? [audioUrl] : [])
+  const wc: number[] = wordCounts ?? (allAudioUrls.length === 1 ? [999999] : [])
+
+  // Build audio clips with time offsets derived from word counts
+  let offset = 0
+  const audioClips = allAudioUrls.map((url, i) => {
+    const start = Math.round(offset * 100) / 100
+    const length = Math.round((totalDuration - offset) * 100) / 100
+    offset += (wc[i] ?? 0) / WORDS_PER_SEC
+    return {
+      asset: { type: 'audio', src: url, volume: 1 },
+      start,
+      length: Math.max(1, length),
+    }
+  })
 
   const imageMap = new Map(imageResults.map((r) => [r.segmentIndex, r.imageUrl]))
   const sorted = [...segments].sort((a, b) => a.segmentIndex - b.segmentIndex)
@@ -88,10 +110,10 @@ export async function POST(req: NextRequest) {
   const subtitleClips = generateSubtitleClips(segments, clipDuration, isVertical)
 
   const timeline = {
-    soundtrack: { src: audioUrl, effect: 'fadeOut' },
     tracks: [
       { clips: subtitleClips },
       { clips: imageclips },
+      { clips: audioClips },
     ],
   }
 
