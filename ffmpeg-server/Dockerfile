@@ -1,9 +1,10 @@
 FROM node:20-slim
 
-# Install FFmpeg + font tools
+# Install FFmpeg, font tools, and CA certificates for HTTPS downloads
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    ca-certificates \
     fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
