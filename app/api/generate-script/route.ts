@@ -4,10 +4,13 @@ import type { Script } from '@/lib/types'
 const KIE_KEY = process.env.KIE_AI_API_KEY!
 
 export async function POST(req: NextRequest) {
+  try {
   const { topic, segmentCount = 20, wordsPerSegment = 65 } = await req.json()
   if (!topic?.trim()) return NextResponse.json({ error: 'topic required' }, { status: 400 })
 
   const totalMinutes = Math.round((segmentCount * wordsPerSegment) / 130)
+  // ~100 tokens per segment (narration + image_prompt + section_title + JSON overhead)
+  const maxTokens = Math.max(8000, segmentCount * 120)
 
   const prompt = `You are a very experienced social media script creator, create script for this topic: "${topic}", you need to create a very catchy 3 seconds hook for the script, and also make the whole script very interesting so that the audience will continue listening, and also get good takeaway at the same time until the end.
 
@@ -33,7 +36,7 @@ Respond with ONLY this JSON structure, no extra text:
         { role: 'user', content: prompt },
       ],
       temperature: 0.7,
-      max_tokens: 8000,
+      max_tokens: maxTokens,
     }),
   })
 
@@ -68,4 +71,8 @@ Respond with ONLY this JSON structure, no extra text:
   }
 
   return NextResponse.json(script)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }
