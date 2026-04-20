@@ -21,6 +21,7 @@ COPY package.json .
 RUN npm install --omit=dev
 COPY server.js .
 COPY transcribe.py .
+COPY tts.py .
 
 ENV PORT=3001
 EXPOSE 3001
