@@ -240,7 +240,7 @@ export default function Home() {
       const { taskIds: audioTaskIds, wordCounts } = await audioSubRes.json()
 
       let audioUrls: string[] = []
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 60; i++) {
         await sleep(8000)
         setStep('audio', { message: `Generating voiceover… (${(i + 1) * 8}s)` })
         const checkRes = await fetch(`/api/check-audio?taskIds=${audioTaskIds.join(',')}`)
