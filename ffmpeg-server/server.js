@@ -63,31 +63,67 @@ function transcribeAudio(audioPath) {
   })
 }
 
-function toSrtTime(sec) {
+function toAssTime(sec) {
   const h = Math.floor(sec / 3600)
   const m = Math.floor((sec % 3600) / 60)
-  const s = Math.floor(sec % 60)
-  const ms = Math.round((sec - Math.floor(sec)) * 1000)
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`
+  const s = sec % 60
+  const cs = Math.round((s - Math.floor(s)) * 100)
+  return `${h}:${String(Math.floor(m)).padStart(2, '0')}:${String(Math.floor(s)).padStart(2, '0')}.${String(cs).padStart(2, '0')}`
 }
 
-// Group words into 6-word chunks and produce SRT content
-function wordsToSrt(allWords) {
+// Karaoke Pop: full 6-word chunk always visible; active word pops orange+larger
+function wordsToKaraokeAss(allWords, isVertical) {
+  const W = isVertical ? 720 : 1280
+  const H = isVertical ? 1280 : 720
+  const fs    = isVertical ? 38 : 28   // base font — fits nicely per resolution
+  const fsPop = isVertical ? 48 : 36   // active word grows ~25%
+  const marginV = isVertical ? 120 : 70
   const CHUNK = 6
+
+  // ASS color: &HAABBGGRR (alpha 00 = opaque)
+  const ORANGE = '&H000066FF&'  // #FF6600 warm orange
+
+  const header = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${W}
+PlayResY: ${H}
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Liberation Sans,${fs},&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,-1,0,0,0,100,100,0.5,0,3,10,0,2,40,40,${marginV},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
+
   const lines = []
-  let idx = 1
+
   for (let i = 0; i < allWords.length; i += CHUNK) {
     const chunk = allWords.slice(i, i + CHUNK)
     if (!chunk.length) continue
-    const start = chunk[0].start
-    const end = chunk[chunk.length - 1].end
-    lines.push(String(idx))
-    lines.push(`${toSrtTime(start)} --> ${toSrtTime(Math.max(end, start + 0.2))}`)
-    lines.push(chunk.map((w) => w.word).join(' ').trim())
-    lines.push('')
-    idx++
+
+    for (let j = 0; j < chunk.length; j++) {
+      const tStart = chunk[j].start
+      const tEnd = j + 1 < chunk.length ? chunk[j + 1].start : chunk[j].end + 0.05
+
+      // Full chunk text: active word gets orange+larger, others use default (white bold)
+      let text = ''
+      for (let k = 0; k < chunk.length; k++) {
+        if (k === j) {
+          text += `{\\c${ORANGE}\\fs${fsPop}}${chunk[k].word}{\\r}`
+        } else {
+          text += chunk[k].word
+        }
+        if (k < chunk.length - 1) text += ' '
+      }
+
+      lines.push(
+        `Dialogue: 0,${toAssTime(tStart)},${toAssTime(Math.max(tEnd, tStart + 0.05))},Default,,0,0,0,,${text}`
+      )
+    }
   }
-  return lines.join('\n')
+
+  return header + '\n' + lines.join('\n') + '\n'
 }
 
 // ── Subtitle style catalog (mirrors lib/subtitle-styles.ts) ──────────────────
@@ -161,9 +197,31 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
     timeOffset += audioDurations[i]
   }
 
-  const srtContent = wordsToSrt(allWords)
-  const srtPath = path.join(jobDir, 'captions.srt')
-  await fs.writeFile(srtPath, srtContent, 'utf8')
+  // Karaoke Pop → ASS; all other styles → SRT with force_style
+  const useKaraoke = !styleId || styleId === 'karaoke-pop'
+  let subFilePath, subFilter
+
+  if (useKaraoke) {
+    const assContent = wordsToKaraokeAss(allWords, isVertical)
+    subFilePath = path.join(jobDir, 'captions.ass')
+    await fs.writeFile(subFilePath, assContent, 'utf8')
+  } else {
+    const srtLines = []
+    let idx = 1
+    const CHUNK = 6
+    for (let i = 0; i < allWords.length; i += CHUNK) {
+      const chunk = allWords.slice(i, i + CHUNK)
+      if (!chunk.length) continue
+      const s = chunk[0].start, e = chunk[chunk.length - 1].end
+      const toSrt = (t) => { const h=Math.floor(t/3600),m=Math.floor((t%3600)/60),sc=Math.floor(t%60),ms=Math.round((t-Math.floor(t))*1000); return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sc).padStart(2,'0')},${String(ms).padStart(3,'0')}` }
+      srtLines.push(String(idx), `${toSrt(s)} --> ${toSrt(Math.max(e, s+0.2))}`, chunk.map(w=>w.word).join(' ').trim(), '')
+      idx++
+    }
+    subFilePath = path.join(jobDir, 'captions.srt')
+    await fs.writeFile(subFilePath, srtLines.join('\n'), 'utf8')
+  }
+
+  jobs.set(jobId, { status: 'processing', progress: 'Rendering video with FFmpeg…', srtPath: subFilePath })
 
   // 4. Write image concat list
   const concatLines = imagePaths.flatMap((p) => [`file '${p}'`, `duration ${clipDuration}`])
@@ -172,13 +230,16 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
   await fs.writeFile(concatPath, concatLines.join('\n'), 'utf8')
 
   // 5. Run FFmpeg with SRT subtitles (force_style gives TikTok-style appearance)
-  jobs.set(jobId, { status: 'processing', progress: 'Rendering video with FFmpeg…' })
   const outputPath = path.join(jobDir, 'output.mp4')
 
-  const escapedSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
+  const escapedSub = subFilePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
   const videoFilter = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=25`
-  const subStyle = resolveStyle(styleId, fontSize, marginV)
-  const subFilter = `subtitles='${escapedSrt}':force_style='${subStyle}'`
+  if (useKaraoke) {
+    subFilter = `subtitles='${escapedSub}'`
+  } else {
+    const subStyle = resolveStyle(styleId, fontSize, marginV)
+    subFilter = `subtitles='${escapedSub}':force_style='${subStyle}'`
+  }
 
   const args = ['-y', '-f', 'concat', '-safe', '0', '-i', concatPath]
   audioPaths.forEach((ap) => args.push('-i', ap))
@@ -212,7 +273,7 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
     })
   })
 
-  jobs.set(jobId, { status: 'done', outputPath, srtPath })
+  jobs.set(jobId, { status: 'done', outputPath, srtPath: subFilePath })
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────

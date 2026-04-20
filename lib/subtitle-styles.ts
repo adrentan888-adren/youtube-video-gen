@@ -19,6 +19,21 @@ export interface SubtitleStyle {
 
 export const SUBTITLE_STYLES: SubtitleStyle[] = [
   {
+    id: 'karaoke-pop',
+    name: 'Karaoke Pop ✦',
+    description: 'Full line visible; active word pops orange+larger in real time — word-level sync from Whisper',
+    ffmpeg: (fs, mv) =>
+      `FontName=Liberation Sans,FontSize=${fs},Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HAA000000,BorderStyle=3,Outline=10,Alignment=2,MarginV=${mv}`,
+    css: {
+      color: 'white',
+      fontWeight: '700',
+      background: 'rgba(0,0,0,0.65)',
+      padding: '6px 14px',
+      borderRadius: '4px',
+    },
+    position: 'bottom',
+  },
+  {
     id: 'tiktok-box',
     name: 'TikTok Box',
     description: 'Bold white text on a semi-transparent dark box — default viral style',

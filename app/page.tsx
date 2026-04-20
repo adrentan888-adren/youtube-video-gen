@@ -191,7 +191,7 @@ export default function Home() {
   const [totalSeconds, setTotalSeconds] = useState(600)
   const [imageInterval, setImageInterval] = useState(30)
   const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>('horizontal')
-  const [styleId, setStyleId] = useState('tiktok-box')
+  const [styleId, setStyleId] = useState('karaoke-pop')
   const [steps, setSteps] = useState<Step[]>(INITIAL_STEPS)
   const [running, setRunning] = useState(false)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)

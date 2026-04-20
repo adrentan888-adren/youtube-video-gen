@@ -33,12 +33,21 @@ export default function CatalogPage() {
                   <div className="w-2/3 h-1 bg-white/10 rounded" />
                 </div>
                 {/* Subtitle text */}
-                <span
-                  className="relative z-10 text-sm font-sans text-center max-w-xs leading-snug"
-                  style={style.css as React.CSSProperties}
-                >
-                  {SAMPLE_TEXT}
-                </span>
+                {style.id === 'karaoke-pop' ? (
+                  <span className="relative z-10 text-sm font-sans text-center max-w-xs leading-snug"
+                    style={{ ...style.css as React.CSSProperties }}>
+                    Julius Caesar{' '}
+                    <span style={{ color: '#FF6600', fontSize: '1.25em', fontWeight: 700 }}>crossed</span>
+                    {' '}the Rubicon River
+                  </span>
+                ) : (
+                  <span
+                    className="relative z-10 text-sm font-sans text-center max-w-xs leading-snug"
+                    style={style.css as React.CSSProperties}
+                  >
+                    {SAMPLE_TEXT}
+                  </span>
+                )}
               </div>
 
               {/* Info */}
