@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import Link from 'next/link'
 import type { Script, ImageResult } from '@/lib/types'
+import { SUBTITLE_STYLES } from '@/lib/subtitle-styles'
 
 type StepStatus = 'idle' | 'running' | 'done' | 'error'
 
@@ -189,6 +191,7 @@ export default function Home() {
   const [totalSeconds, setTotalSeconds] = useState(600)
   const [imageInterval, setImageInterval] = useState(30)
   const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>('horizontal')
+  const [styleId, setStyleId] = useState('tiktok-box')
   const [steps, setSteps] = useState<Step[]>(INITIAL_STEPS)
   const [running, setRunning] = useState(false)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -281,6 +284,7 @@ export default function Home() {
           title: script.title,
           clipDuration: imageInterval,
           orientation,
+          styleId,
         }),
       })
       if (!renderRes.ok) throw new Error(`Render submit: ${(await renderRes.json()).error}`)
@@ -442,6 +446,33 @@ export default function Home() {
                 min={5}
                 max={120}
               />
+            </div>
+          </div>
+
+          {/* Subtitle style selector */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-white/30 font-medium uppercase tracking-widest">Subtitle Style</p>
+              <Link href="/catalog" target="_blank" className="text-xs text-purple-400/70 hover:text-purple-300 transition-colors">
+                View all styles →
+              </Link>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {SUBTITLE_STYLES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  disabled={running}
+                  onClick={() => setStyleId(s.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 border ${
+                    styleId === s.id
+                      ? 'bg-purple-500/30 text-purple-200 border-purple-500/50'
+                      : 'bg-white/5 text-white/40 border-transparent hover:bg-white/10 hover:text-white/60'
+                  } disabled:cursor-not-allowed disabled:opacity-40`}
+                >
+                  {s.name}
+                </button>
+              ))}
             </div>
           </div>
 

@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
       title,
       clipDuration = 30,
       orientation = 'horizontal',
+      styleId = 'tiktok-box',
     }: {
       segments: Segment[]
       imageResults: ImageResult[]
@@ -21,6 +22,7 @@ export async function POST(req: NextRequest) {
       title: string
       clipDuration?: number
       orientation?: string
+      styleId?: string
     } = await req.json()
 
     const sorted = [...segments].sort((a, b) => a.segmentIndex - b.segmentIndex)
@@ -37,6 +39,7 @@ export async function POST(req: NextRequest) {
         segments: sorted,
         clipDuration,
         orientation,
+        styleId,
       }),
     })
 

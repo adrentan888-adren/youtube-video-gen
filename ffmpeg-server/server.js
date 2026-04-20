@@ -90,9 +90,31 @@ function wordsToSrt(allWords) {
   return lines.join('\n')
 }
 
+// ── Subtitle style catalog (mirrors lib/subtitle-styles.ts) ──────────────────
+
+const STYLES = {
+  'tiktok-box': (fs, mv) =>
+    `FontName=Liberation Sans,FontSize=${fs},Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H99000000,BorderStyle=3,Outline=12,Alignment=2,MarginV=${mv}`,
+  'youtube-classic': (fs, mv) =>
+    `FontName=Liberation Sans,FontSize=${fs},Bold=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=${mv}`,
+  'netflix': (fs, mv) =>
+    `FontName=Liberation Sans,FontSize=${fs},Bold=0,PrimaryColour=&H00FFFFFF,BackColour=&HFF000000,BorderStyle=3,Outline=8,Alignment=2,MarginV=${mv}`,
+  'bold-yellow': (fs, mv) =>
+    `FontName=Liberation Sans,FontSize=${fs},Bold=1,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=${mv}`,
+  'minimal': (fs, mv) =>
+    `FontName=Liberation Sans,FontSize=${fs},Bold=0,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=1,Outline=1,Shadow=0,Alignment=2,MarginV=${mv}`,
+  'top-box': (fs, _mv) =>
+    `FontName=Liberation Sans,FontSize=${fs},Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H99000000,BorderStyle=3,Outline=12,Alignment=8,MarginV=60`,
+}
+
+function resolveStyle(styleId, fontSize, marginV) {
+  const fn = STYLES[styleId] ?? STYLES['tiktok-box']
+  return fn(fontSize, marginV)
+}
+
 // ── Video processing ──────────────────────────────────────────────────────────
 
-async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments, clipDuration, orientation }) {
+async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments, clipDuration, orientation, styleId }) {
   const jobDir = path.join(WORK_DIR, jobId)
   await fs.mkdir(jobDir, { recursive: true })
 
@@ -155,7 +177,7 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
 
   const escapedSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
   const videoFilter = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=25`
-  const subStyle = `FontName=Liberation Sans,FontSize=${fontSize},Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H99000000,BorderStyle=3,Outline=12,Alignment=2,MarginV=${marginV}`
+  const subStyle = resolveStyle(styleId, fontSize, marginV)
   const subFilter = `subtitles='${escapedSrt}':force_style='${subStyle}'`
 
   const args = ['-y', '-f', 'concat', '-safe', '0', '-i', concatPath]
