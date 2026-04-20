@@ -276,6 +276,50 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
   jobs.set(jobId, { status: 'done', outputPath, srtPath: subFilePath })
 }
 
+// ── TTS via edge-tts ──────────────────────────────────────────────────────────
+// POST /tts  { chunks: string[], voice?: string }
+// Returns    { audioUrls: string[] }  — synchronous, edge-tts is fast
+
+app.post('/tts', async (req, res) => {
+  const { chunks, voice = 'en-US-JennyNeural' } = req.body
+  if (!Array.isArray(chunks) || !chunks.length) return res.status(400).json({ error: 'chunks[] required' })
+
+  try {
+    const base = `${req.protocol}://${req.headers.host}`
+    const audioUrls = []
+
+    for (let i = 0; i < chunks.length; i++) {
+      const ttsId = crypto.randomUUID()
+      const outPath = path.join(WORK_DIR, `tts_${ttsId}.mp3`)
+
+      await new Promise((resolve, reject) => {
+        const py = spawn('python3', [path.join(__dirname, 'tts.py'), chunks[i], outPath, voice])
+        let err = ''
+        py.stderr.on('data', (d) => { err += d.toString() })
+        py.on('close', (code) => {
+          if (code !== 0) return reject(new Error(`edge-tts failed (chunk ${i}): ${err.slice(-300)}`))
+          resolve()
+        })
+      })
+
+      audioUrls.push(`${base}/tts-audio/${ttsId}`)
+      // Store path for serving
+      jobs.set(`tts_${ttsId}`, { audioPath: outPath })
+    }
+
+    res.json({ audioUrls })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get('/tts-audio/:ttsId', (req, res) => {
+  const job = jobs.get(`tts_${req.params.ttsId}`)
+  if (!job || !job.audioPath) return res.status(404).json({ error: 'Audio not found' })
+  res.setHeader('Content-Type', 'audio/mpeg')
+  fsSync.createReadStream(job.audioPath).pipe(res)
+})
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 app.post('/render', (req, res) => {

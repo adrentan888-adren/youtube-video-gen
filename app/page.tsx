@@ -232,27 +232,15 @@ export default function Home() {
       setStep('script', { status: 'done', message: `"${script.title}" — ${script.segments.length} segments` })
 
       // ── STEP 2: Audio ──────────────────────────────────────────────
-      setStep('audio', { status: 'running', message: 'Submitting TTS job…' })
+      setStep('audio', { status: 'running', message: 'Generating voiceover…' })
 
-      const audioSubRes = await fetch('/api/submit-audio', {
+      const audioRes = await fetch('/api/generate-audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ narration: script.fullNarration }),
       })
-      if (!audioSubRes.ok) throw new Error(`Audio submit: ${(await audioSubRes.json()).error}`)
-      const { taskIds: audioTaskIds, wordCounts } = await audioSubRes.json()
-
-      let audioUrls: string[] = []
-      for (let i = 0; i < 60; i++) {
-        await sleep(8000)
-        setStep('audio', { message: `Generating voiceover… (${(i + 1) * 8}s)` })
-        const checkRes = await fetch(`/api/check-audio?taskIds=${audioTaskIds.join(',')}`)
-        if (!checkRes.ok) throw new Error('Audio check failed')
-        const { status, audioUrls: urls } = await checkRes.json()
-        if (status === 'done' && urls?.length) { audioUrls = urls; break }
-        if (status === 'failed') throw new Error('TTS generation failed')
-      }
-      if (!audioUrls.length) throw new Error('Audio timed out')
+      if (!audioRes.ok) throw new Error(`Audio: ${(await audioRes.json()).error}`)
+      const { audioUrls, wordCounts } = await audioRes.json()
       setStep('audio', { status: 'done', message: `Voiceover ready (${audioUrls.length} part${audioUrls.length > 1 ? 's' : ''})` })
 
       // ── STEP 3: Images ─────────────────────────────────────────────
@@ -319,8 +307,8 @@ export default function Home() {
   }
 
   const allDone = videoUrl !== null
-  const durationLabel = DURATION_OPTIONS.find(([, s]) => s === totalSeconds)?.[0] ?? ''
-  const intervalLabel = INTERVAL_OPTIONS.find(([, s]) => s === imageInterval)?.[0] ?? ''
+  const durationLabel = DURATION_OPTIONS.find(([, s]) => s === totalSeconds)?.[0] ?? `${Math.round(totalSeconds / 60)} min`
+  const intervalLabel = INTERVAL_OPTIONS.find(([, s]) => s === imageInterval)?.[0] ?? `${imageInterval}s`
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center px-4 py-16 relative overflow-hidden">
