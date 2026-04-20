@@ -223,8 +223,12 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
 
   jobs.set(jobId, { status: 'processing', progress: 'Rendering video with FFmpeg…', srtPath: subFilePath })
 
-  // 4. Write image concat list
-  const concatLines = imagePaths.flatMap((p) => [`file '${p}'`, `duration ${clipDuration}`])
+  // 4. Write image concat list — use actual audio duration so images stay in sync
+  const totalAudioDuration = audioDurations.reduce((sum, d) => sum + d, 0)
+  const effectiveClipDuration = totalAudioDuration > 0
+    ? (totalAudioDuration / imagePaths.length).toFixed(4)
+    : clipDuration
+  const concatLines = imagePaths.flatMap((p) => [`file '${p}'`, `duration ${effectiveClipDuration}`])
   concatLines.push(`file '${imagePaths[imagePaths.length - 1]}'`)
   const concatPath = path.join(jobDir, 'images.txt')
   await fs.writeFile(concatPath, concatLines.join('\n'), 'utf8')
