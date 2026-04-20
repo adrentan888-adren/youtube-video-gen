@@ -190,7 +190,7 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
     })
   })
 
-  jobs.set(jobId, { status: 'done', outputPath })
+  jobs.set(jobId, { status: 'done', outputPath, srtPath })
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -223,6 +223,14 @@ app.get('/video/:jobId', (req, res) => {
   res.setHeader('Content-Type', 'video/mp4')
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"')
   fsSync.createReadStream(job.outputPath).pipe(res)
+})
+
+app.get('/srt/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId)
+  if (!job || !job.srtPath) return res.status(404).json({ error: 'SRT not found' })
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+  res.setHeader('Content-Disposition', `attachment; filename="captions.srt"`)
+  fsSync.createReadStream(job.srtPath).pipe(res)
 })
 
 app.get('/health', (_, res) => res.json({ ok: true }))
