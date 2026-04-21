@@ -229,12 +229,10 @@ async function processVideo(jobId, { imageUrls, audioUrls, words: precomputedWor
     await fs.writeFile(subFilePath, srtLines.join('\n'), 'utf8')
   }
 
-  jobs.set(jobId, { status: 'processing', progress: 'Rendering video with FFmpeg…', srtPath: subFilePath })
+  jobs.set(jobId, { status: 'processing', progress: 'Rendering staging video…', srtPath: subFilePath })
 
-  // 4. Write image concat list — each image shows for exactly clipDuration seconds.
-  //    Images are time-indexed (one per interval window) so fixed duration is correct.
+  // 4. Write image concat list
   const totalAudioDuration = audioDurations.reduce((sum, d) => sum + d, 0)
-  // Use actual audio duration divided evenly so the image sequence ends with the audio.
   const effectiveDur = totalAudioDuration > 0
     ? (totalAudioDuration / imagePaths.length).toFixed(4)
     : String(clipDuration)
@@ -243,11 +241,44 @@ async function processVideo(jobId, { imageUrls, audioUrls, words: precomputedWor
   const concatPath = path.join(jobDir, 'images.txt')
   await fs.writeFile(concatPath, concatLines.join('\n'), 'utf8')
 
-  // 5. Run FFmpeg with SRT subtitles (force_style gives TikTok-style appearance)
-  const outputPath = path.join(jobDir, 'output.mp4')
-
-  const escapedSub = subFilePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
   const videoFilter = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=25`
+
+  // 5. Pass 1 — staging video: images + audio, NO subtitles
+  const stagingPath = path.join(jobDir, 'staging.mp4')
+
+  const stagingArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', concatPath]
+  audioPaths.forEach((ap) => stagingArgs.push('-i', ap))
+
+  let stagingFilter, stagingMap
+  if (audioPaths.length === 1) {
+    stagingFilter = `[0:v]${videoFilter}[vout]`
+    stagingMap = ['-map', '[vout]', '-map', '1:a']
+  } else {
+    const audioInputs = audioPaths.map((_, i) => `[${i + 1}:a]`).join('')
+    stagingFilter = `[0:v]${videoFilter}[vout];${audioInputs}concat=n=${audioPaths.length}:v=0:a=1[aout]`
+    stagingMap = ['-map', '[vout]', '-map', '[aout]']
+  }
+
+  stagingArgs.push('-filter_complex', stagingFilter, ...stagingMap)
+  stagingArgs.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+    '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', stagingPath)
+
+  await new Promise((resolve, reject) => {
+    const ff = spawn('ffmpeg', stagingArgs)
+    let stderr = ''
+    ff.stderr.on('data', (d) => { stderr += d.toString() })
+    ff.on('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`FFmpeg staging exit ${code}: ${stderr.slice(-600)}`))
+    })
+  })
+
+  jobs.set(jobId, { status: 'processing', progress: 'Burning subtitles…', srtPath: subFilePath, stagingPath })
+
+  // 6. Pass 2 — burn ASS subtitles onto staging video
+  const outputPath = path.join(jobDir, 'output.mp4')
+  const escapedSub = subFilePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
+
   if (useKaraoke) {
     subFilter = `subtitles='${escapedSub}'`
   } else {
@@ -255,39 +286,26 @@ async function processVideo(jobId, { imageUrls, audioUrls, words: precomputedWor
     subFilter = `subtitles='${escapedSub}':force_style='${subStyle}'`
   }
 
-  const args = ['-y', '-f', 'concat', '-safe', '0', '-i', concatPath]
-  audioPaths.forEach((ap) => args.push('-i', ap))
-
-  let filterComplex, mapArgs
-  if (audioPaths.length === 1) {
-    filterComplex = `[0:v]${videoFilter}[vs];[vs]${subFilter}[vout]`
-    mapArgs = ['-map', '[vout]', '-map', '1:a']
-  } else {
-    const audioInputs = audioPaths.map((_, i) => `[${i + 1}:a]`).join('')
-    const audioConcat = `${audioInputs}concat=n=${audioPaths.length}:v=0:a=1[aout]`
-    filterComplex = `[0:v]${videoFilter}[vs];[vs]${subFilter}[vout];${audioConcat}`
-    mapArgs = ['-map', '[vout]', '-map', '[aout]']
-  }
-
-  args.push('-filter_complex', filterComplex, ...mapArgs)
-  args.push(
+  const subArgs = [
+    '-y', '-i', stagingPath,
+    '-vf', subFilter,
     '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-    '-c:a', 'aac', '-b:a', '128k',
+    '-c:a', 'copy',
     '-movflags', '+faststart',
-    outputPath
-  )
+    outputPath,
+  ]
 
   await new Promise((resolve, reject) => {
-    const ff = spawn('ffmpeg', args)
+    const ff = spawn('ffmpeg', subArgs)
     let stderr = ''
     ff.stderr.on('data', (d) => { stderr += d.toString() })
     ff.on('close', (code) => {
       if (code === 0) resolve()
-      else reject(new Error(`FFmpeg exit ${code}: ${stderr.slice(-600)}`))
+      else reject(new Error(`FFmpeg subtitle burn exit ${code}: ${stderr.slice(-600)}`))
     })
   })
 
-  jobs.set(jobId, { status: 'done', outputPath, srtPath: subFilePath })
+  jobs.set(jobId, { status: 'done', outputPath, stagingPath, srtPath: subFilePath })
 }
 
 // ── TTS via edge-tts ──────────────────────────────────────────────────────────
@@ -370,7 +388,12 @@ app.get('/status/:jobId', (req, res) => {
   if (!job) return res.status(404).json({ error: 'Job not found' })
   if (job.status === 'done') {
     const base = `${req.protocol}://${req.headers.host}`
-    return res.json({ status: 'done', videoUrl: `${base}/video/${req.params.jobId}` })
+    return res.json({
+      status: 'done',
+      videoUrl: `${base}/video/${req.params.jobId}`,
+      stagingUrl: `${base}/staging/${req.params.jobId}`,
+      srtUrl: `${base}/srt/${req.params.jobId}`,
+    })
   }
   res.json({ status: job.status, progress: job.progress, error: job.error })
 })
@@ -383,6 +406,16 @@ app.get('/video/:jobId', (req, res) => {
   res.setHeader('Content-Type', 'video/mp4')
   res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"')
   fsSync.createReadStream(job.outputPath).pipe(res)
+})
+
+app.get('/staging/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId)
+  if (!job || !job.stagingPath) {
+    return res.status(404).json({ error: 'Staging video not ready' })
+  }
+  res.setHeader('Content-Type', 'video/mp4')
+  res.setHeader('Content-Disposition', 'attachment; filename="staging.mp4"')
+  fsSync.createReadStream(job.stagingPath).pipe(res)
 })
 
 app.get('/srt/:jobId', (req, res) => {
