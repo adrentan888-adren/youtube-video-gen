@@ -317,7 +317,7 @@ app.post('/tts', async (req, res) => {
   if (!Array.isArray(chunks) || !chunks.length) return res.status(400).json({ error: 'chunks[] required' })
 
   try {
-    const base = `${req.protocol}://${req.headers.host}`
+    const base = `https://${req.headers.host}`
     const audioUrls = []
 
     for (let i = 0; i < chunks.length; i++) {
@@ -387,7 +387,7 @@ app.get('/status/:jobId', (req, res) => {
   const job = jobs.get(req.params.jobId)
   if (!job) return res.status(404).json({ error: 'Job not found' })
   if (job.status === 'done') {
-    const base = `${req.protocol}://${req.headers.host}`
+    const base = `https://${req.headers.host}`
     return res.json({
       status: 'done',
       videoUrl: `${base}/video/${req.params.jobId}`,
