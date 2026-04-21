@@ -104,10 +104,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 
     for (let j = 0; j < chunk.length; j++) {
       const tStart = chunk[j].start
-      const MAX_WORD_HIGHLIGHT = 0.8  // cap Whisper silence-spanning end timestamps
-      const tEnd = j + 1 < chunk.length
+      const MAX_WORD_HIGHLIGHT = 0.8  // cap Whisper silence-spanning timestamps for any word
+      const rawEnd = j + 1 < chunk.length
         ? chunk[j + 1].start
-        : Math.min(chunk[j].end, chunk[j].start + MAX_WORD_HIGHLIGHT) + 0.05
+        : Math.min(chunk[j].end, tStart + MAX_WORD_HIGHLIGHT) + 0.05
+      const tEnd = Math.min(rawEnd, tStart + MAX_WORD_HIGHLIGHT + 0.05)
 
       // Full chunk text: active word gets orange+larger, others use default (white bold)
       let text = ''
