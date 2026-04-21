@@ -178,9 +178,9 @@ function StepRow({ step, index }: { step: Step; index: number }) {
 }
 
 const INITIAL_STEPS: Step[] = [
-  { id: 'script', label: 'Script', sublabel: 'GPT-5.2 generates script', status: 'idle' },
-  { id: 'audio', label: 'Narration', sublabel: 'ElevenLabs TTS creates voiceover', status: 'idle' },
-  { id: 'images', label: 'Visuals', sublabel: 'Pexels stock photos sourced', status: 'idle' },
+  { id: 'script', label: 'Script', sublabel: 'GPT-5.2 generates narration script', status: 'idle' },
+  { id: 'audio', label: 'Narration', sublabel: 'TTS voiceover + word-level transcription', status: 'idle' },
+  { id: 'images', label: 'Visuals', sublabel: 'LLM keywords + Pexels stock photos', status: 'idle' },
   { id: 'video', label: 'Video', sublabel: 'FFmpeg assembles with subtitles', status: 'idle' },
 ]
 
@@ -231,8 +231,8 @@ export default function Home() {
       setVideoTitle(script.title)
       setStep('script', { status: 'done', message: `"${script.title}" — ${script.segments.length} segments` })
 
-      // ── STEP 2: Audio ──────────────────────────────────────────────
-      setStep('audio', { status: 'running', message: 'Generating voiceover…' })
+      // ── STEP 2: Audio + Transcription ──────────────────────────────
+      setStep('audio', { status: 'running', message: 'Generating voiceover + transcribing…' })
 
       const audioRes = await fetch('/api/generate-audio', {
         method: 'POST',
@@ -240,22 +240,36 @@ export default function Home() {
         body: JSON.stringify({ narration: script.fullNarration }),
       })
       if (!audioRes.ok) throw new Error(`Audio: ${(await audioRes.json()).error}`)
-      const { audioUrls, wordCounts } = await audioRes.json()
-      setStep('audio', { status: 'done', message: `Voiceover ready (${audioUrls.length} part${audioUrls.length > 1 ? 's' : ''})` })
+      const { audioUrls, words, duration } = await audioRes.json()
+      const numImages = Math.ceil(duration / imageInterval)
+      setStep('audio', { status: 'done', message: `Voiceover ready · ${duration.toFixed(1)}s · ${numImages} scenes` })
 
-      // ── STEP 3: Images ─────────────────────────────────────────────
-      setStep('images', { status: 'running', message: `Searching ${script.segments.length} stock photos…` })
+      // ── STEP 3: Keywords + Images ───────────────────────────────────
+      setStep('images', { status: 'running', message: `Generating ${numImages} image keywords…` })
+
+      const kwRes = await fetch('/api/generate-keywords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ words, duration, imageInterval }),
+      })
+      if (!kwRes.ok) throw new Error(`Keywords: ${(await kwRes.json()).error}`)
+      const { keywords } = await kwRes.json()
+
+      setStep('images', { message: `Searching ${keywords.length} stock photos…` })
 
       const imgRes = await fetch('/api/search-images', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ segments: script.segments, orientation }),
+        body: JSON.stringify({ keywords, orientation }),
       })
       if (!imgRes.ok) throw new Error(`Image search: ${(await imgRes.json()).error}`)
       const { imageResults }: { imageResults: ImageResult[] } = await imgRes.json()
 
-      if (imageResults.length < script.segments.length)
-        throw new Error(`Only ${imageResults.length}/${script.segments.length} images found`)
+      // Sort by segmentIndex to ensure correct order
+      const imageUrls = [...imageResults]
+        .sort((a, b) => a.segmentIndex - b.segmentIndex)
+        .map((r) => r.imageUrl)
+
       setStep('images', { status: 'done', message: `${imageResults.length} stock photos sourced` })
 
       // ── STEP 4: Render ─────────────────────────────────────────────
@@ -265,10 +279,9 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          segments: script.segments,
-          imageResults,
+          imageUrls,
           audioUrls,
-          wordCounts,
+          words,
           title: script.title,
           clipDuration: imageInterval,
           orientation,

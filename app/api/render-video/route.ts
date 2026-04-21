@@ -1,33 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
-import type { Segment, ImageResult } from '@/lib/types'
 
 const FFMPEG_URL = process.env.FFMPEG_SERVER_URL!
+
+type Word = { word: string; start: number; end: number }
 
 export async function POST(req: NextRequest) {
   try {
     const {
-      segments,
-      imageResults,
+      imageUrls,
       audioUrls,
-      wordCounts,
+      words,
       title,
-      clipDuration = 30,
+      clipDuration = 5,
       orientation = 'horizontal',
       styleId = 'tiktok-box',
     }: {
-      segments: Segment[]
-      imageResults: ImageResult[]
+      imageUrls: string[]
       audioUrls: string[]
-      wordCounts: number[]
+      words: Word[]
       title: string
       clipDuration?: number
       orientation?: string
       styleId?: string
     } = await req.json()
-
-    const sorted = [...segments].sort((a, b) => a.segmentIndex - b.segmentIndex)
-    const imageMap = new Map(imageResults.map((r) => [r.segmentIndex, r.imageUrl]))
-    const imageUrls = sorted.map((s) => imageMap.get(s.segmentIndex) ?? '')
 
     const res = await fetch(`${FFMPEG_URL}/render`, {
       method: 'POST',
@@ -35,8 +30,7 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         imageUrls,
         audioUrls,
-        wordCounts,
-        segments: sorted,
+        words,       // pre-transcribed — Railway skips whisper
         clipDuration,
         orientation,
         styleId,

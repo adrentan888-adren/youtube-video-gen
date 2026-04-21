@@ -3,48 +3,62 @@ import { NextRequest, NextResponse } from 'next/server'
 const FFMPEG_URL = process.env.FFMPEG_SERVER_URL!
 const MAX_TTS_CHARS = 4900
 
-export const maxDuration = 120 // 2 min Vercel timeout
+export const maxDuration = 180 // 3 min for TTS + transcription
 
-function splitNarration(text: string): { chunks: string[]; wordCounts: number[] } {
-  if (text.length <= MAX_TTS_CHARS) {
-    return { chunks: [text], wordCounts: [text.trim().split(/\s+/).length] }
-  }
+function splitNarration(text: string): string[] {
+  if (text.length <= MAX_TTS_CHARS) return [text]
   const chunks: string[] = []
-  const wordCounts: number[] = []
   let remaining = text.trim()
   while (remaining.length > MAX_TTS_CHARS) {
     let cutAt = remaining.lastIndexOf(' ', MAX_TTS_CHARS)
     if (cutAt <= 0) cutAt = MAX_TTS_CHARS
-    const chunk = remaining.slice(0, cutAt).trim()
-    chunks.push(chunk)
-    wordCounts.push(chunk.split(/\s+/).length)
+    chunks.push(remaining.slice(0, cutAt).trim())
     remaining = remaining.slice(cutAt).trim()
   }
-  if (remaining) {
-    chunks.push(remaining)
-    wordCounts.push(remaining.split(/\s+/).length)
-  }
-  return { chunks, wordCounts }
+  if (remaining) chunks.push(remaining)
+  return chunks
 }
 
 export async function POST(req: NextRequest) {
   try {
     const { narration, voice = 'en-US-JennyNeural' } = await req.json()
-    const { chunks, wordCounts } = splitNarration(narration)
+    const chunks = splitNarration(narration)
 
-    const res = await fetch(`${FFMPEG_URL}/tts`, {
+    // Step 1: Generate TTS for all chunks
+    const ttsRes = await fetch(`${FFMPEG_URL}/tts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chunks, voice }),
     })
-
-    if (!res.ok) {
-      const txt = await res.text()
+    if (!ttsRes.ok) {
+      const txt = await ttsRes.text()
       return NextResponse.json({ error: `TTS failed: ${txt.slice(0, 200)}` }, { status: 500 })
     }
+    const { audioUrls }: { audioUrls: string[] } = await ttsRes.json()
 
-    const { audioUrls } = await res.json()
-    return NextResponse.json({ audioUrls, wordCounts })
+    // Step 2: Transcribe each chunk, offset timestamps by cumulative duration
+    type Word = { word: string; start: number; end: number }
+    const allWords: Word[] = []
+    let totalDuration = 0
+
+    for (const audioUrl of audioUrls) {
+      const transcribeRes = await fetch(`${FFMPEG_URL}/transcribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioUrl }),
+      })
+      if (!transcribeRes.ok) {
+        const txt = await transcribeRes.text()
+        return NextResponse.json({ error: `Transcribe failed: ${txt.slice(0, 200)}` }, { status: 500 })
+      }
+      const { words, duration }: { words: Word[]; duration: number } = await transcribeRes.json()
+      for (const w of words) {
+        if (w.word) allWords.push({ word: w.word, start: w.start + totalDuration, end: w.end + totalDuration })
+      }
+      totalDuration += duration
+    }
+
+    return NextResponse.json({ audioUrls, words: allWords, duration: totalDuration })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })
