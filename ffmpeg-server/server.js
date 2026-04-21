@@ -72,7 +72,8 @@ function toAssTime(sec) {
 }
 
 // Karaoke Pop: full 6-word chunk always visible; active word pops orange+larger
-function wordsToKaraokeAss(allWords, isVertical) {
+// segments (optional): array of {narration} — used to force chunk boundaries at segment edges
+function wordsToKaraokeAss(allWords, isVertical, segments) {
   const W = isVertical ? 720 : 1280
   const H = isVertical ? 1280 : 720
   const fs    = isVertical ? 38 : 28   // base font — fits nicely per resolution
@@ -98,8 +99,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 
   const lines = []
 
-  for (let i = 0; i < allWords.length; i += CHUNK) {
-    const chunk = allWords.slice(i, i + CHUNK)
+  // Build word groups: one group per segment (so chunks never straddle segment boundaries)
+  let wordGroups
+  if (segments && segments.length > 0) {
+    const segWordCounts = segments.map(s => s.narration.trim().split(/\s+/).length)
+    wordGroups = []
+    let wi = 0
+    for (const count of segWordCounts) {
+      const grp = allWords.slice(wi, wi + count)
+      if (grp.length) wordGroups.push(grp)
+      wi += count
+    }
+    // Any trailing words from whisper get appended to the last group
+    if (wi < allWords.length) {
+      if (!wordGroups.length) wordGroups.push([])
+      wordGroups[wordGroups.length - 1].push(...allWords.slice(wi))
+    }
+  } else {
+    wordGroups = [allWords]
+  }
+
+  for (const groupWords of wordGroups) {
+  for (let i = 0; i < groupWords.length; i += CHUNK) {
+    const chunk = groupWords.slice(i, i + CHUNK)
     if (!chunk.length) continue
 
     for (let j = 0; j < chunk.length; j++) {
@@ -122,6 +144,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       )
     }
   }
+  } // end groupWords loop
 
   return header + '\n' + lines.join('\n') + '\n'
 }
@@ -202,7 +225,7 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
   let subFilePath, subFilter
 
   if (useKaraoke) {
-    const assContent = wordsToKaraokeAss(allWords, isVertical)
+    const assContent = wordsToKaraokeAss(allWords, isVertical, segments)
     subFilePath = path.join(jobDir, 'captions.ass')
     await fs.writeFile(subFilePath, assContent, 'utf8')
   } else {
@@ -223,12 +246,21 @@ async function processVideo(jobId, { imageUrls, audioUrls, wordCounts, segments,
 
   jobs.set(jobId, { status: 'processing', progress: 'Rendering video with FFmpeg…', srtPath: subFilePath })
 
-  // 4. Write image concat list — use actual audio duration so images stay in sync
+  // 4. Write image concat list — per-segment duration proportional to word count so images
+  //    transition at the same time the narration for each segment is actually spoken.
   const totalAudioDuration = audioDurations.reduce((sum, d) => sum + d, 0)
-  const effectiveClipDuration = totalAudioDuration > 0
-    ? (totalAudioDuration / imagePaths.length).toFixed(4)
-    : clipDuration
-  const concatLines = imagePaths.flatMap((p) => [`file '${p}'`, `duration ${effectiveClipDuration}`])
+  let clipDurations
+  if (totalAudioDuration > 0 && segments && segments.length === imagePaths.length) {
+    const segWordCounts = segments.map(s => s.narration.trim().split(/\s+/).length)
+    const totalWords = segWordCounts.reduce((sum, n) => sum + n, 0)
+    clipDurations = segWordCounts.map(n => (n / totalWords * totalAudioDuration).toFixed(4))
+  } else {
+    const uniform = totalAudioDuration > 0
+      ? (totalAudioDuration / imagePaths.length).toFixed(4)
+      : String(clipDuration)
+    clipDurations = imagePaths.map(() => uniform)
+  }
+  const concatLines = imagePaths.flatMap((p, i) => [`file '${p}'`, `duration ${clipDurations[i]}`])
   concatLines.push(`file '${imagePaths[imagePaths.length - 1]}'`)
   const concatPath = path.join(jobDir, 'images.txt')
   await fs.writeFile(concatPath, concatLines.join('\n'), 'utf8')
