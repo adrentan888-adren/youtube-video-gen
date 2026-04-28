@@ -229,39 +229,79 @@ async function processVideo(jobId, { imageUrls, audioUrls, words: precomputedWor
     await fs.writeFile(subFilePath, srtLines.join('\n'), 'utf8')
   }
 
-  jobs.set(jobId, { status: 'processing', progress: 'Rendering staging video…', srtPath: subFilePath })
+  jobs.set(jobId, { status: 'processing', progress: 'Rendering Ken Burns clips…', srtPath: subFilePath })
 
-  // 4. Write image concat list
+  // 4. Compute per-clip duration
   const totalAudioDuration = audioDurations.reduce((sum, d) => sum + d, 0)
-  const effectiveDur = totalAudioDuration > 0
-    ? (totalAudioDuration / imagePaths.length).toFixed(4)
-    : String(clipDuration)
-  const concatLines = imagePaths.flatMap((p) => [`file '${p}'`, `duration ${effectiveDur}`])
-  concatLines.push(`file '${imagePaths[imagePaths.length - 1]}'`)
-  const concatPath = path.join(jobDir, 'images.txt')
-  await fs.writeFile(concatPath, concatLines.join('\n'), 'utf8')
+  const effectiveDurSec = totalAudioDuration > 0
+    ? totalAudioDuration / imagePaths.length
+    : clipDuration
+  const effectiveDur = effectiveDurSec.toFixed(4)
 
-  const videoFilter = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=25`
-
-  // 5. Pass 1 — staging video: images + audio, NO subtitles
-  const stagingPath = path.join(jobDir, 'staging.mp4')
-
-  const stagingArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', concatPath]
-  audioPaths.forEach((ap) => stagingArgs.push('-i', ap))
-
-  let stagingFilter, stagingMap
-  if (audioPaths.length === 1) {
-    stagingFilter = `[0:v]${videoFilter}[vout]`
-    stagingMap = ['-map', '[vout]', '-map', '1:a']
-  } else {
-    const audioInputs = audioPaths.map((_, i) => `[${i + 1}:a]`).join('')
-    stagingFilter = `[0:v]${videoFilter}[vout];${audioInputs}concat=n=${audioPaths.length}:v=0:a=1[aout]`
-    stagingMap = ['-map', '[vout]', '-map', '[aout]']
+  // Ken Burns effect: 6 alternating directions per clip (pan + zoom via scale+crop)
+  function kenBurnsVF(idx) {
+    const SW = Math.round(W * 1.3)
+    const SH = Math.round(H * 1.3)
+    const dx = SW - W   // pan range X
+    const dy = SH - H   // pan range Y
+    const d = effectiveDur
+    const base = `scale=${SW}:${SH}:force_original_aspect_ratio=increase`
+    const effects = [
+      // Pan right
+      `${base},crop=${W}:${H}:'${dx}*t/${d}':'${dy}/2',setsar=1,fps=25`,
+      // Pan left
+      `${base},crop=${W}:${H}:'${dx}*(1-t/${d})':'${dy}/2',setsar=1,fps=25`,
+      // Pan down
+      `${base},crop=${W}:${H}:'${dx}/2':'${dy}*t/${d}',setsar=1,fps=25`,
+      // Pan up
+      `${base},crop=${W}:${H}:'${dx}/2':'${dy}*(1-t/${d})',setsar=1,fps=25`,
+      // Zoom in: crop shrinks toward center then scale to output
+      `${base},crop='${SW}-${dx}*t/${d}':'${SH}-${dy}*t/${d}':'${dx}*t/${d}/2':'${dy}*t/${d}/2',scale=${W}:${H},setsar=1,fps=25`,
+      // Zoom out: crop grows from center then scale to output
+      `${base},crop='${W}+${dx}*t/${d}':'${H}+${dy}*t/${d}':'${dx}*(1-t/${d})/2':'${dy}*(1-t/${d})/2',scale=${W}:${H},setsar=1,fps=25`,
+    ]
+    return effects[idx % effects.length]
   }
 
-  stagingArgs.push('-filter_complex', stagingFilter, ...stagingMap)
-  stagingArgs.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-    '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', stagingPath)
+  // 5. Render each image as a Ken Burns video clip
+  const kbClipPaths = []
+  for (let i = 0; i < imagePaths.length; i++) {
+    jobs.set(jobId, { status: 'processing', progress: `Ken Burns: clip ${i + 1}/${imagePaths.length}…`, srtPath: subFilePath })
+    const clipPath = path.join(jobDir, `kb_${String(i).padStart(4, '0')}.mp4`)
+    await new Promise((resolve, reject) => {
+      const ff = spawn('ffmpeg', [
+        '-y', '-loop', '1', '-t', effectiveDur, '-i', imagePaths[i],
+        '-vf', kenBurnsVF(i),
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-r', '25', '-an',
+        clipPath,
+      ])
+      let stderr = ''
+      ff.stderr.on('data', (d) => { stderr += d.toString() })
+      ff.on('close', (code) => code === 0 ? resolve() : reject(new Error(`KB clip ${i} exit ${code}: ${stderr.slice(-400)}`)))
+    })
+    kbClipPaths.push(clipPath)
+  }
+
+  // 6. Pass 1 — concat Ken Burns clips + audio → staging.mp4
+  jobs.set(jobId, { status: 'processing', progress: 'Assembling staging video…', srtPath: subFilePath })
+
+  const clipListPath = path.join(jobDir, 'clips.txt')
+  await fs.writeFile(clipListPath, kbClipPaths.map((p) => `file '${p}'`).join('\n'), 'utf8')
+
+  const stagingPath = path.join(jobDir, 'staging.mp4')
+  const stagingArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', clipListPath]
+  audioPaths.forEach((ap) => stagingArgs.push('-i', ap))
+
+  let stagingMap
+  if (audioPaths.length === 1) {
+    stagingMap = ['-map', '0:v', '-map', '1:a']
+  } else {
+    const audioInputs = audioPaths.map((_, i) => `[${i + 1}:a]`).join('')
+    stagingArgs.push('-filter_complex', `${audioInputs}concat=n=${audioPaths.length}:v=0:a=1[aout]`)
+    stagingMap = ['-map', '0:v', '-map', '[aout]']
+  }
+
+  stagingArgs.push(...stagingMap, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', stagingPath)
 
   await new Promise((resolve, reject) => {
     const ff = spawn('ffmpeg', stagingArgs)
