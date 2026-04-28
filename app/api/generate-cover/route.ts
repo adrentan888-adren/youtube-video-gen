@@ -12,7 +12,7 @@ async function buildCoverPrompt(topic: string, orientation: string): Promise<str
       model: 'gpt-5-2',
       messages: [{
         role: 'user',
-        content: `Write a vivid, cinematic image generation prompt (max 60 words) for a ${aspectHint} cover image about: "${topic}". Include style: dramatic lighting, high detail, cinematic, epic. Return ONLY the prompt text, nothing else.`,
+        content: `Write a vivid, cinematic image generation prompt (max 60 words) for a ${aspectHint} cover image about: "${topic}". Include style: dramatic lighting, high detail, cinematic, epic. Return ONLY the raw prompt text with no JSON, no quotes, no labels.`,
       }],
       max_tokens: 120,
       temperature: 0.8,
@@ -20,7 +20,13 @@ async function buildCoverPrompt(topic: string, orientation: string): Promise<str
   })
   if (!res.ok) throw new Error(`LLM prompt failed: ${(await res.text()).slice(0, 100)}`)
   const raw = await res.json()
-  return (raw.data?.choices?.[0]?.message?.content ?? raw.choices?.[0]?.message?.content ?? topic).trim()
+  let text: string = (raw.data?.choices?.[0]?.message?.content ?? raw.choices?.[0]?.message?.content ?? topic).trim()
+  // If model returned JSON, extract the prompt value
+  try {
+    const parsed = JSON.parse(text)
+    text = parsed.prompt ?? parsed.text ?? parsed.description ?? Object.values(parsed)[0] ?? topic
+  } catch { /* not JSON, use as-is */ }
+  return String(text).trim()
 }
 
 export async function POST(req: NextRequest) {
@@ -38,9 +44,11 @@ export async function POST(req: NextRequest) {
       `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}` +
       `?width=${w}&height=${h}&model=flux&nologo=true&seed=${Math.floor(Math.random() * 99999)}`
 
-    // Verify the image is accessible
-    const check = await fetch(coverUrl, { method: 'HEAD' })
-    if (!check.ok) throw new Error(`Image generation failed: HTTP ${check.status}`)
+    // Fully fetch the image now to pre-warm Pollinations CDN cache
+    // (Railway will download from the cached URL later — avoids generation delay)
+    const warmup = await fetch(coverUrl)
+    if (!warmup.ok) throw new Error(`Image generation failed: HTTP ${warmup.status}`)
+    await warmup.arrayBuffer() // consume body to complete the request
 
     return NextResponse.json({ coverUrl, imagePrompt })
   } catch (err: unknown) {
