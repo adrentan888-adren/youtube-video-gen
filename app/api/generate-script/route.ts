@@ -59,7 +59,7 @@ ${hookInstruction}
 
 STRICT RULES:
 - Exactly ${batchCount} segments numbered from ${batchStart + 1} to ${batchStart + batchCount}
-- narration: EXACTLY ${wordsPerSegment} words per segment — count every word, must be between ${Math.round(wordsPerSegment * 0.9)} and ${wordsPerSegment} words, never shorter
+- narration: between ${Math.round(wordsPerSegment * 0.85)} and ${wordsPerSegment} words per segment (aim for ${wordsPerSegment}, never write fewer than ${Math.round(wordsPerSegment * 0.85)})
 - image_prompt: 10-12 words MAXIMUM (short scene description only)
 - section_title: 3-5 words MAXIMUM (catchy chapter heading)
 
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
 
 STRICT RULES:
 - Exactly ${segmentCount} segments
-- narration: EXACTLY ${wordsPerSegment} words per segment — count every word, must be between ${Math.round(wordsPerSegment * 0.9)} and ${wordsPerSegment} words, never shorter
+- narration: between ${Math.round(wordsPerSegment * 0.85)} and ${wordsPerSegment} words per segment (aim for ${wordsPerSegment}, never write fewer than ${Math.round(wordsPerSegment * 0.85)})
 - image_prompt: 10-12 words MAXIMUM (short scene description only)
 - section_title: 3-5 words MAXIMUM (catchy chapter heading)
 
