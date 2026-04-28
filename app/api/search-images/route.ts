@@ -5,43 +5,36 @@ const PEXELS_KEY = process.env.PEXELS_API_KEY!
 
 export async function POST(req: NextRequest) {
   try {
-    const { keywords, orientation = 'horizontal' }: { keywords: string[]; orientation?: string } = await req.json()
+    const { topic, count, orientation = 'horizontal' }: { topic: string; count: number; orientation?: string } = await req.json()
     const pexelsOrientation = orientation === 'vertical' ? 'portrait' : 'landscape'
+    const query = topic.slice(0, 100)
 
-    const results = await Promise.all(
-      keywords.map(async (keyword, index): Promise<ImageResult> => {
-        const query = keyword.slice(0, 100)
+    // Fetch enough pages to cover count (max 80 per page)
+    const perPage = 80
+    const pagesNeeded = Math.ceil(count / perPage)
+    const photos: { src: { large2x: string } }[] = []
 
-        const res = await fetch(
-          `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=5&orientation=${pexelsOrientation}`,
-          { headers: { Authorization: PEXELS_KEY } }
-        )
+    for (let page = 1; page <= Math.min(pagesNeeded + 1, 3); page++) {
+      const res = await fetch(
+        `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${perPage}&page=${page}&orientation=${pexelsOrientation}`,
+        { headers: { Authorization: PEXELS_KEY } }
+      )
+      if (!res.ok) {
+        const txt = await res.text()
+        throw new Error(`Pexels search failed (page ${page}): ${txt.slice(0, 100)}`)
+      }
+      const data = await res.json()
+      photos.push(...(data.photos ?? []))
+      if (photos.length >= count) break
+    }
 
-        if (!res.ok) {
-          const txt = await res.text()
-          throw new Error(`Pexels search failed for index ${index}: ${txt.slice(0, 100)}`)
-        }
+    if (photos.length === 0) throw new Error(`No photos found for topic: "${query}"`)
 
-        const data = await res.json()
-        const photos = data.photos ?? []
-        const photo = photos[index % Math.max(photos.length, 1)] ?? photos[0]
-
-        if (!photo) {
-          // Fallback: simpler 2-word query
-          const fallbackQuery = query.split(' ').slice(0, 2).join(' ')
-          const fallbackRes = await fetch(
-            `https://api.pexels.com/v1/search?query=${encodeURIComponent(fallbackQuery)}&per_page=3&orientation=${pexelsOrientation}`,
-            { headers: { Authorization: PEXELS_KEY } }
-          )
-          const fallbackData = await fallbackRes.json()
-          const fallbackPhoto = (fallbackData.photos ?? [])[0]
-          if (!fallbackPhoto) throw new Error(`No photo found for index ${index}: "${query}"`)
-          return { segmentIndex: index, imageUrl: fallbackPhoto.src.large2x }
-        }
-
-        return { segmentIndex: index, imageUrl: photo.src.large2x }
-      })
-    )
+    // Fill all count slots, cycling through available photos if fewer than needed
+    const results: ImageResult[] = Array.from({ length: count }, (_, i) => ({
+      segmentIndex: i,
+      imageUrl: photos[i % photos.length].src.large2x,
+    }))
 
     return NextResponse.json({ imageResults: results })
   } catch (err: unknown) {

@@ -180,7 +180,7 @@ function StepRow({ step, index }: { step: Step; index: number }) {
 const INITIAL_STEPS: Step[] = [
   { id: 'script', label: 'Script', sublabel: 'GPT-5.2 generates narration script', status: 'idle' },
   { id: 'audio', label: 'Narration', sublabel: 'TTS voiceover + word-level transcription', status: 'idle' },
-  { id: 'images', label: 'Visuals', sublabel: 'LLM keywords + Pexels stock photos', status: 'idle' },
+  { id: 'images', label: 'Visuals', sublabel: 'AI cover + Pexels stock photos', status: 'idle' },
   { id: 'video', label: 'Video', sublabel: 'FFmpeg assembles with subtitles', status: 'idle' },
 ]
 
@@ -245,42 +245,32 @@ export default function Home() {
       setStep('audio', { status: 'done', message: `Voiceover ready · ${duration.toFixed(1)}s · ${numImages} scenes` })
 
       // ── STEP 3: Cover + Keywords + Images ──────────────────────────
-      setStep('images', { status: 'running', message: `Generating AI cover + ${numImages} image keywords…` })
+      setStep('images', { status: 'running', message: `Generating AI cover + searching ${numImages} Pexels photos…` })
 
-      // AI-generated cover image for the first slot (runs in parallel with keywords)
-      const [coverRes, kwRes] = await Promise.all([
+      // Cover + stock images run in parallel (both topic-based, no LLM keywords needed)
+      const [coverRes, imgRes] = await Promise.all([
         fetch('/api/generate-cover', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ topic, orientation }),
         }),
-        fetch('/api/generate-keywords', {
+        fetch('/api/search-images', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ words, duration, imageInterval }),
+          body: JSON.stringify({ topic, count: numImages, orientation }),
         }),
       ])
       const { coverUrl } = coverRes.ok ? await coverRes.json() : { coverUrl: null }
-      if (!kwRes.ok) throw new Error(`Keywords: ${(await kwRes.json()).error}`)
-      const { keywords } = await kwRes.json()
-
-      setStep('images', { message: `Searching ${keywords.length} stock photos…` })
-
-      const imgRes = await fetch('/api/search-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords, orientation }),
-      })
       if (!imgRes.ok) throw new Error(`Image search: ${(await imgRes.json()).error}`)
       const { imageResults }: { imageResults: ImageResult[] } = await imgRes.json()
 
-      // Sort by segmentIndex; replace first image with AI-generated cover
+      // Sort by segmentIndex; replace first slot with AI-generated cover
       const stockUrls = [...imageResults]
         .sort((a, b) => a.segmentIndex - b.segmentIndex)
         .map((r) => r.imageUrl)
       const imageUrls = coverUrl ? [coverUrl, ...stockUrls.slice(1)] : stockUrls
 
-      setStep('images', { status: 'done', message: `AI cover + ${stockUrls.length - 1} stock photos sourced` })
+      setStep('images', { status: 'done', message: `AI cover + ${stockUrls.length - 1} Pexels photos sourced` })
 
       // ── STEP 4: Render ─────────────────────────────────────────────
       setStep('video', { status: 'running', message: 'Submitting render…' })
