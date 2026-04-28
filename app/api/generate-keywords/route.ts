@@ -37,7 +37,7 @@ Respond with ONLY a JSON array of ${numImages} keyword strings, one per segment:
         model: 'gpt-5-2',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.4,
-        max_tokens: 500,
+        max_tokens: 2000,
       }),
     })
 
