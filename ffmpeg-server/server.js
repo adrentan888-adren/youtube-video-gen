@@ -75,9 +75,9 @@ function toAssTime(sec) {
 function wordsToKaraokeAss(allWords, isVertical) {
   const W = isVertical ? 720 : 1280
   const H = isVertical ? 1280 : 720
-  const fs    = isVertical ? 38 : 28   // base font — fits nicely per resolution
-  const fsPop = isVertical ? 48 : 36   // active word grows ~25%
-  const marginV = isVertical ? 120 : 70
+  const fs    = Math.round(H * 0.032)   // ~3.2% of height: 23px @720p, 41px @1280p
+  const fsPop = Math.round(fs * 1.25)   // active word ~25% larger
+  const marginV = Math.round(H * 0.22)  // center between middle and bottom: 158px @720p
   const CHUNK = 6
 
   // ASS color: &HAABBGGRR (alpha 00 = opaque)
@@ -161,8 +161,8 @@ async function processVideo(jobId, { imageUrls, audioUrls, words: precomputedWor
   const isVertical = orientation === 'vertical'
   const W = isVertical ? 720 : 1280
   const H = isVertical ? 1280 : 720
-  const fontSize = isVertical ? 42 : 36
-  const marginV = isVertical ? 110 : 80
+  const fontSize = Math.round(H * 0.032)  // ~3.2% of height: 23px @720p, 41px @1280p
+  const marginV = Math.round(H * 0.22)    // center between middle and bottom: 158px @720p
 
   // 1. Download images (batches of 10)
   jobs.set(jobId, { status: 'processing', progress: `Downloading ${imageUrls.length} images…` })
