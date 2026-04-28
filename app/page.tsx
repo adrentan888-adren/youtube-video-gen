@@ -244,14 +244,23 @@ export default function Home() {
       const numImages = Math.ceil(duration / imageInterval)
       setStep('audio', { status: 'done', message: `Voiceover ready · ${duration.toFixed(1)}s · ${numImages} scenes` })
 
-      // ── STEP 3: Keywords + Images ───────────────────────────────────
-      setStep('images', { status: 'running', message: `Generating ${numImages} image keywords…` })
+      // ── STEP 3: Cover + Keywords + Images ──────────────────────────
+      setStep('images', { status: 'running', message: `Generating AI cover + ${numImages} image keywords…` })
 
-      const kwRes = await fetch('/api/generate-keywords', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ words, duration, imageInterval }),
-      })
+      // AI-generated cover image for the first slot (runs in parallel with keywords)
+      const [coverRes, kwRes] = await Promise.all([
+        fetch('/api/generate-cover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topic, orientation }),
+        }),
+        fetch('/api/generate-keywords', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ words, duration, imageInterval }),
+        }),
+      ])
+      const { coverUrl } = coverRes.ok ? await coverRes.json() : { coverUrl: null }
       if (!kwRes.ok) throw new Error(`Keywords: ${(await kwRes.json()).error}`)
       const { keywords } = await kwRes.json()
 
@@ -265,12 +274,13 @@ export default function Home() {
       if (!imgRes.ok) throw new Error(`Image search: ${(await imgRes.json()).error}`)
       const { imageResults }: { imageResults: ImageResult[] } = await imgRes.json()
 
-      // Sort by segmentIndex to ensure correct order
-      const imageUrls = [...imageResults]
+      // Sort by segmentIndex; replace first image with AI-generated cover
+      const stockUrls = [...imageResults]
         .sort((a, b) => a.segmentIndex - b.segmentIndex)
         .map((r) => r.imageUrl)
+      const imageUrls = coverUrl ? [coverUrl, ...stockUrls.slice(1)] : stockUrls
 
-      setStep('images', { status: 'done', message: `${imageResults.length} stock photos sourced` })
+      setStep('images', { status: 'done', message: `AI cover + ${stockUrls.length - 1} stock photos sourced` })
 
       // ── STEP 4: Render ─────────────────────────────────────────────
       setStep('video', { status: 'running', message: 'Submitting render…' })
