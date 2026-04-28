@@ -1,56 +1,75 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const KIE_KEY = process.env.KIE_AI_API_KEY!
-
-// Ask the LLM to write a vivid image generation prompt for the cover
-async function buildCoverPrompt(topic: string, orientation: string): Promise<string> {
-  const aspectHint = orientation === 'vertical' ? 'vertical 9:16 TikTok thumbnail' : 'wide 16:9 YouTube thumbnail'
-  const res = await fetch('https://api.kie.ai/gpt-5-2/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${KIE_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'gpt-5-2',
-      messages: [{
-        role: 'user',
-        content: `Write a vivid, cinematic image generation prompt (max 60 words) for a ${aspectHint} cover image about: "${topic}". Include style: dramatic lighting, high detail, cinematic, epic. Return ONLY the raw prompt text with no JSON, no quotes, no labels.`,
-      }],
-      max_tokens: 120,
-      temperature: 0.8,
-    }),
-  })
-  if (!res.ok) throw new Error(`LLM prompt failed: ${(await res.text()).slice(0, 100)}`)
-  const raw = await res.json()
-  let text: string = (raw.data?.choices?.[0]?.message?.content ?? raw.choices?.[0]?.message?.content ?? topic).trim()
-  // If model returned JSON, extract the prompt value
-  try {
-    const parsed = JSON.parse(text)
-    text = parsed.prompt ?? parsed.text ?? parsed.description ?? Object.values(parsed)[0] ?? topic
-  } catch { /* not JSON, use as-is */ }
-  return String(text).trim()
-}
+const POLL_INTERVAL_MS = 3000
+const POLL_TIMEOUT_MS = 120_000
 
 export async function POST(req: NextRequest) {
   try {
     const { topic, orientation = 'horizontal' }: { topic: string; orientation?: string } = await req.json()
     if (!topic?.trim()) return NextResponse.json({ error: 'topic required' }, { status: 400 })
 
-    // Build a detailed prompt via LLM
-    const imagePrompt = await buildCoverPrompt(topic, orientation)
+    const aspectRatio = orientation === 'vertical' ? '9:16' : '16:9'
+    const prompt =
+      `Create a first frame cover image for the topic "${topic}" that is suitable for social media platforms YouTube and TikTok. ` +
+      `The image should be cinematic, visually striking, with dramatic lighting and high detail. ` +
+      `Include bold visual elements that represent the topic. Style: epic, cinematic, high-resolution.`
 
-    // Generate via Pollinations.ai (free, no key needed, returns JPEG directly)
-    const w = orientation === 'vertical' ? 1024 : 1792
-    const h = orientation === 'vertical' ? 1792 : 1024
-    const coverUrl =
-      `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}` +
-      `?width=${w}&height=${h}&model=flux&nologo=true&seed=${Math.floor(Math.random() * 99999)}`
+    // Submit image generation task
+    const createRes = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${KIE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-image-2-text-to-image',
+        input: { prompt, aspect_ratio: aspectRatio, resolution: '1K' },
+      }),
+    })
 
-    // Fully fetch the image now to pre-warm Pollinations CDN cache
-    // (Railway will download from the cached URL later — avoids generation delay)
-    const warmup = await fetch(coverUrl)
-    if (!warmup.ok) throw new Error(`Image generation failed: HTTP ${warmup.status}`)
-    await warmup.arrayBuffer() // consume body to complete the request
+    if (!createRes.ok) {
+      const txt = await createRes.text()
+      return NextResponse.json({ error: `Image task create failed: ${txt.slice(0, 200)}` }, { status: 500 })
+    }
 
-    return NextResponse.json({ coverUrl, imagePrompt })
+    const createData = await createRes.json()
+    const taskId: string = createData?.data?.taskId
+    if (!taskId) return NextResponse.json({ error: `No taskId returned: ${JSON.stringify(createData).slice(0, 200)}` }, { status: 500 })
+
+    // Poll until success or timeout
+    const deadline = Date.now() + POLL_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
+
+      const pollRes = await fetch(`https://api.kie.ai/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, {
+        headers: { Authorization: `Bearer ${KIE_KEY}` },
+      })
+      if (!pollRes.ok) continue
+
+      const pollData = await pollRes.json()
+      const record = pollData?.data
+      if (!record) continue
+
+      const state: string = record.state ?? ''
+
+      if (state === 'fail') {
+        return NextResponse.json({ error: `Image generation failed for taskId ${taskId}` }, { status: 500 })
+      }
+
+      if (state === 'success') {
+        let resultUrls: string[] = []
+        try {
+          const parsed = typeof record.resultJson === 'string' ? JSON.parse(record.resultJson) : record.resultJson
+          resultUrls = parsed?.resultUrls ?? []
+        } catch { /* ignore */ }
+
+        const coverUrl = resultUrls[0]
+        if (!coverUrl) return NextResponse.json({ error: 'No result URL in completed task' }, { status: 500 })
+
+        return NextResponse.json({ coverUrl, imagePrompt: prompt })
+      }
+      // else: waiting/queuing/generating — keep polling
+    }
+
+    return NextResponse.json({ error: `Image generation timed out after ${POLL_TIMEOUT_MS / 1000}s` }, { status: 504 })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })
