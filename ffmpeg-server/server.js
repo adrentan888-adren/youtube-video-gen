@@ -426,6 +426,44 @@ app.get('/srt/:jobId', (req, res) => {
   fsSync.createReadStream(job.srtPath).pipe(res)
 })
 
+// GET /frame/:jobId/:sec — extract a single frame at t=sec seconds from staging video
+app.get('/frame/:jobId/:sec', async (req, res) => {
+  const job = jobs.get(req.params.jobId)
+  if (!job || !job.stagingPath) return res.status(404).json({ error: 'Staging video not found' })
+  const sec = parseFloat(req.params.sec)
+  if (isNaN(sec) || sec < 0) return res.status(400).json({ error: 'Invalid time' })
+
+  const framePath = path.join(WORK_DIR, `frame_${req.params.jobId}_${sec}.jpg`)
+  try {
+    await new Promise((resolve, reject) => {
+      const ff = spawn('ffmpeg', [
+        '-y', '-ss', String(sec), '-i', job.stagingPath,
+        '-vframes', '1', '-q:v', '2', framePath,
+      ])
+      let stderr = ''
+      ff.stderr.on('data', (d) => { stderr += d.toString() })
+      ff.on('close', (code) => code === 0 ? resolve() : reject(new Error(stderr.slice(-200))))
+    })
+    res.setHeader('Content-Type', 'image/jpeg')
+    fsSync.createReadStream(framePath).pipe(res)
+    res.on('finish', () => fs.unlink(framePath).catch(() => {}))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /duration/:jobId — return staging video duration in seconds
+app.get('/duration/:jobId', async (req, res) => {
+  const job = jobs.get(req.params.jobId)
+  if (!job || !job.stagingPath) return res.status(404).json({ error: 'Staging video not found' })
+  try {
+    const duration = await getAudioDuration(job.stagingPath)
+    res.json({ duration })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/health', (_, res) => res.json({ ok: true }))
 
 const PORT = process.env.PORT || 3001
