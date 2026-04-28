@@ -245,20 +245,16 @@ async function processVideo(jobId, { imageUrls, audioUrls, words: precomputedWor
     const dx = SW - W   // pan range X
     const dy = SH - H   // pan range Y
     const d = effectiveDur
-    const base = `scale=${SW}:${SH}:force_original_aspect_ratio=increase`
+    // Note: FFmpeg crop only evaluates width/height once; x/y are per-frame.
+    // So we use fixed crop size and animate x/y for pan effects.
+    const base = `format=yuv420p,scale=${SW}:${SH}:force_original_aspect_ratio=increase,crop=${W}:${H}`
     const effects = [
-      // Pan right
-      `${base},crop=${W}:${H}:'${dx}*t/${d}':'${dy}/2',setsar=1,fps=25`,
-      // Pan left
-      `${base},crop=${W}:${H}:'${dx}*(1-t/${d})':'${dy}/2',setsar=1,fps=25`,
-      // Pan down
-      `${base},crop=${W}:${H}:'${dx}/2':'${dy}*t/${d}',setsar=1,fps=25`,
-      // Pan up
-      `${base},crop=${W}:${H}:'${dx}/2':'${dy}*(1-t/${d})',setsar=1,fps=25`,
-      // Zoom in: crop shrinks toward center then scale to output
-      `${base},crop='${SW}-${dx}*t/${d}':'${SH}-${dy}*t/${d}':'${dx}*t/${d}/2':'${dy}*t/${d}/2',scale=${W}:${H},setsar=1,fps=25`,
-      // Zoom out: crop grows from center then scale to output
-      `${base},crop='${W}+${dx}*t/${d}':'${H}+${dy}*t/${d}':'${dx}*(1-t/${d})/2':'${dy}*(1-t/${d})/2',scale=${W}:${H},setsar=1,fps=25`,
+      `${base}:'${dx}*t/${d}':'${dy}/2',setsar=1,fps=25`,           // pan left→right
+      `${base}:'${dx}*(1-t/${d})':'${dy}/2',setsar=1,fps=25`,       // pan right→left
+      `${base}:'${dx}/2':'${dy}*t/${d}',setsar=1,fps=25`,           // pan top→bottom
+      `${base}:'${dx}/2':'${dy}*(1-t/${d})',setsar=1,fps=25`,       // pan bottom→top
+      `${base}:'${dx}*t/${d}/2':'${dy}*t/${d}/2',setsar=1,fps=25`, // pan diagonal ↘
+      `${base}:'${dx}*(1-t/${d}/2)':'${dy}/2',setsar=1,fps=25`,    // pan right→center
     ]
     return effects[idx % effects.length]
   }
